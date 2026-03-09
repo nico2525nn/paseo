@@ -1,6 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import type { DoctorCheckResult } from "../types.js";
+
+const execFileAsync = promisify(execFile);
 
 interface ProviderDef {
   name: string;
@@ -16,18 +19,20 @@ const PROVIDERS: ProviderDef[] = [
 
 const EXEC_TIMEOUT_MS = 5000;
 
-function whichCommand(command: string): string | null {
+async function whichCommand(command: string): Promise<string | null> {
   const whichBin = process.platform === "win32" ? "where" : "which";
   try {
-    return execFileSync(whichBin, [command], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS }).trim() || null;
+    const { stdout } = await execFileAsync(whichBin, [command], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS });
+    return stdout.trim() || null;
   } catch {
     return null;
   }
 }
 
-function getVersion(binaryPath: string): string | null {
+async function getVersion(binaryPath: string): Promise<string | null> {
   try {
-    return execFileSync(binaryPath, ["--version"], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS }).trim() || null;
+    const { stdout } = await execFileAsync(binaryPath, ["--version"], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS });
+    return stdout.trim() || null;
   } catch {
     return null;
   }
@@ -50,7 +55,7 @@ function checkBinary(provider: ProviderDef, binaryPath: string | null): DoctorCh
   };
 }
 
-function checkVersion(provider: ProviderDef, binaryPath: string | null): DoctorCheckResult {
+async function checkVersion(provider: ProviderDef, binaryPath: string | null): Promise<DoctorCheckResult> {
   if (!binaryPath) {
     return {
       id: `provider.${provider.name}.version`,
@@ -60,7 +65,7 @@ function checkVersion(provider: ProviderDef, binaryPath: string | null): DoctorC
     };
   }
 
-  const version = getVersion(binaryPath);
+  const version = await getVersion(binaryPath);
   if (version) {
     return {
       id: `provider.${provider.name}.version`,
@@ -78,12 +83,12 @@ function checkVersion(provider: ProviderDef, binaryPath: string | null): DoctorC
   };
 }
 
+async function checkProvider(provider: ProviderDef): Promise<DoctorCheckResult[]> {
+  const binaryPath = await whichCommand(provider.command);
+  return [checkBinary(provider, binaryPath), await checkVersion(provider, binaryPath)];
+}
+
 export async function runProviderChecks(): Promise<DoctorCheckResult[]> {
-  const results: DoctorCheckResult[] = [];
-  for (const provider of PROVIDERS) {
-    const binaryPath = whichCommand(provider.command);
-    results.push(checkBinary(provider, binaryPath));
-    results.push(checkVersion(provider, binaryPath));
-  }
-  return results;
+  const perProvider = await Promise.all(PROVIDERS.map(checkProvider));
+  return perProvider.flat();
 }

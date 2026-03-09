@@ -1,4 +1,4 @@
-import { loadPersistedConfig } from "../../persisted-config.js";
+import { loadPersistedConfig, type PersistedConfig } from "../../persisted-config.js";
 import type { DoctorCheckResult } from "../types.js";
 
 /**
@@ -20,53 +20,58 @@ function isValidListenString(listen: string): boolean {
   return Number.isFinite(parseInt(listen, 10));
 }
 
-function checkConfigValid(paseoHome: string): DoctorCheckResult {
-  try {
-    loadPersistedConfig(paseoHome);
+function checkConfigValid(config: PersistedConfig | null, loadError: string | null): DoctorCheckResult {
+  if (config) {
     return {
       id: "config.valid",
       label: "Config file",
       status: "ok",
       detail: "Valid",
     };
-  } catch (err) {
-    return {
-      id: "config.valid",
-      label: "Config file",
-      status: "error",
-      detail: err instanceof Error ? err.message : String(err),
-    };
   }
+  return {
+    id: "config.valid",
+    label: "Config file",
+    status: "error",
+    detail: loadError ?? "Unknown error",
+  };
 }
 
-function checkListenAddress(paseoHome: string): DoctorCheckResult {
-  try {
-    const config = loadPersistedConfig(paseoHome);
-    const listen = config.daemon?.listen ?? "127.0.0.1:6767";
-    if (!isValidListenString(listen)) {
-      return {
-        id: "config.listen",
-        label: "Listen address",
-        status: "error",
-        detail: `Malformed listen address: ${listen}`,
-      };
-    }
-    return {
-      id: "config.listen",
-      label: "Listen address",
-      status: "ok",
-      detail: listen,
-    };
-  } catch (err) {
+function checkListenAddress(config: PersistedConfig | null): DoctorCheckResult {
+  if (!config) {
     return {
       id: "config.listen",
       label: "Listen address",
       status: "error",
-      detail: err instanceof Error ? err.message : String(err),
+      detail: "Cannot check (config failed to load)",
     };
   }
+
+  const listen = config.daemon?.listen ?? "127.0.0.1:6767";
+  if (!isValidListenString(listen)) {
+    return {
+      id: "config.listen",
+      label: "Listen address",
+      status: "error",
+      detail: `Malformed listen address: ${listen}`,
+    };
+  }
+  return {
+    id: "config.listen",
+    label: "Listen address",
+    status: "ok",
+    detail: listen,
+  };
 }
 
 export async function runConfigChecks(paseoHome: string): Promise<DoctorCheckResult[]> {
-  return [checkConfigValid(paseoHome), checkListenAddress(paseoHome)];
+  let config: PersistedConfig | null = null;
+  let loadError: string | null = null;
+  try {
+    config = loadPersistedConfig(paseoHome);
+  } catch (err) {
+    loadError = err instanceof Error ? err.message : String(err);
+  }
+
+  return [checkConfigValid(config, loadError), checkListenAddress(config)];
 }

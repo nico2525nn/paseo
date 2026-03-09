@@ -83,7 +83,7 @@ export async function runDoctorCommand(
 
   let report: DoctorReport
   if (remote) {
-    const host = getDaemonHost(options)
+    const host = getDaemonHost({ host: options.host as string | undefined })
     report = await fetchRemoteReport(host)
   } else {
     report = await runDoctorChecks()
