@@ -14,9 +14,12 @@ const PROVIDERS: ProviderDef[] = [
   { name: "opencode", command: "opencode", label: "OpenCode CLI" },
 ];
 
+const EXEC_TIMEOUT_MS = 5000;
+
 function whichCommand(command: string): string | null {
+  const whichBin = process.platform === "win32" ? "where" : "which";
   try {
-    return execFileSync("which", [command], { encoding: "utf8" }).trim() || null;
+    return execFileSync(whichBin, [command], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS }).trim() || null;
   } catch {
     return null;
   }
@@ -24,14 +27,13 @@ function whichCommand(command: string): string | null {
 
 function getVersion(binaryPath: string): string | null {
   try {
-    return execFileSync(binaryPath, ["--version"], { encoding: "utf8" }).trim() || null;
+    return execFileSync(binaryPath, ["--version"], { encoding: "utf8", timeout: EXEC_TIMEOUT_MS }).trim() || null;
   } catch {
     return null;
   }
 }
 
-function checkBinary(provider: ProviderDef): DoctorCheckResult {
-  const binaryPath = whichCommand(provider.command);
+function checkBinary(provider: ProviderDef, binaryPath: string | null): DoctorCheckResult {
   if (binaryPath) {
     return {
       id: `provider.${provider.name}.binary`,
@@ -48,8 +50,7 @@ function checkBinary(provider: ProviderDef): DoctorCheckResult {
   };
 }
 
-function checkVersion(provider: ProviderDef): DoctorCheckResult {
-  const binaryPath = whichCommand(provider.command);
+function checkVersion(provider: ProviderDef, binaryPath: string | null): DoctorCheckResult {
   if (!binaryPath) {
     return {
       id: `provider.${provider.name}.version`,
@@ -80,8 +81,9 @@ function checkVersion(provider: ProviderDef): DoctorCheckResult {
 export async function runProviderChecks(): Promise<DoctorCheckResult[]> {
   const results: DoctorCheckResult[] = [];
   for (const provider of PROVIDERS) {
-    results.push(checkBinary(provider));
-    results.push(checkVersion(provider));
+    const binaryPath = whichCommand(provider.command);
+    results.push(checkBinary(provider, binaryPath));
+    results.push(checkVersion(provider, binaryPath));
   }
   return results;
 }

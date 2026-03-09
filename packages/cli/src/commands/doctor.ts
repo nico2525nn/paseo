@@ -16,11 +16,11 @@ interface DoctorRow {
 function statusIndicator(status: DoctorCheckResult['status']): string {
   switch (status) {
     case 'ok':
-      return 'ok'
+      return '✓ ok'
     case 'warn':
-      return 'warn'
+      return '⚠ warn'
     case 'error':
-      return 'error'
+      return '✗ error'
   }
 }
 
@@ -41,9 +41,10 @@ function createDoctorSchema(report: DoctorReport): OutputSchema<DoctorRow> {
         header: 'STATUS',
         field: 'status',
         color: (value) => {
-          if (value === 'ok') return 'green'
-          if (value === 'warn') return 'yellow'
-          if (value === 'error') return 'red'
+          const v = typeof value === 'string' ? value : ''
+          if (v.includes('ok')) return 'green'
+          if (v.includes('warn')) return 'yellow'
+          if (v.includes('error')) return 'red'
           return undefined
         },
       },
