@@ -1195,6 +1195,18 @@ const ThreadStartedNotificationSchema = z
   })
   .passthrough();
 
+const ThreadStatusChangedNotificationSchema = z
+  .object({
+    threadId: z.string().optional(),
+    status: z
+      .object({
+        type: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
 const TurnStartedNotificationSchema = z
   .object({
     turn: z.object({ id: z.string() }).passthrough(),
@@ -1402,6 +1414,16 @@ const ItemFileChangeOutputDeltaNotificationSchema = z
   })
   .passthrough();
 
+const ItemCommandExecutionOutputDeltaNotificationSchema = z
+  .object({
+    itemId: z.string().optional(),
+    callId: z.string().optional(),
+    stream: z.string().optional(),
+    delta: z.string().optional(),
+    chunk: z.string().optional(),
+  })
+  .passthrough();
+
 const CodexEventTurnDiffNotificationSchema = z
   .object({
     msg: z
@@ -1416,6 +1438,7 @@ const CodexEventTurnDiffNotificationSchema = z
 
 type ParsedCodexNotification =
   | { kind: "thread_started"; threadId: string }
+  | { kind: "thread_status_changed"; threadId: string | null; statusType: string | null }
   | { kind: "turn_started"; turnId: string }
   | { kind: "turn_completed"; status: string; errorMessage: string | null }
   | { kind: "plan_updated"; plan: Array<{ step: string | null; status: string | null }> }
@@ -1493,6 +1516,25 @@ const CodexNotificationSchema = z.union([
       }),
     ),
   z.object({ method: z.literal("thread/started"), params: z.unknown() }).transform(
+    ({ method, params }): ParsedCodexNotification => ({
+      kind: "invalid_payload",
+      method,
+      params,
+    }),
+  ),
+  z
+    .object({
+      method: z.literal("thread/status/changed"),
+      params: ThreadStatusChangedNotificationSchema,
+    })
+    .transform(
+      ({ params }): ParsedCodexNotification => ({
+        kind: "thread_status_changed",
+        threadId: params.threadId ?? null,
+        statusType: params.status?.type ?? null,
+      }),
+    ),
+  z.object({ method: z.literal("thread/status/changed"), params: z.unknown() }).transform(
     ({ method, params }): ParsedCodexNotification => ({
       kind: "invalid_payload",
       method,
@@ -1874,6 +1916,28 @@ const CodexNotificationSchema = z.union([
   ),
   z
     .object({
+      method: z.literal("item/commandExecution/outputDelta"),
+      params: ItemCommandExecutionOutputDeltaNotificationSchema,
+    })
+    .transform(
+      ({ params }): ParsedCodexNotification => ({
+        kind: "exec_command_output_delta",
+        callId: params.callId ?? params.itemId ?? null,
+        stream: params.stream ?? null,
+        chunk: params.delta ?? params.chunk ?? null,
+      }),
+    ),
+  z
+    .object({ method: z.literal("item/commandExecution/outputDelta"), params: z.unknown() })
+    .transform(
+      ({ method, params }): ParsedCodexNotification => ({
+        kind: "invalid_payload",
+        method,
+        params,
+      }),
+    ),
+  z
+    .object({
       method: z.literal("codex/event/turn_diff"),
       params: CodexEventTurnDiffNotificationSchema,
     })
@@ -2035,6 +2099,7 @@ export async function codexAppServerTurnInputFromPrompt(
 export const __codexAppServerInternals = {
   mapCodexPatchNotificationToToolCall,
   shouldBufferCodexEventUntilTurnStarted,
+  shouldSynthesizeTurnCompletionFromThreadStatus,
 };
 
 function isTerminalAgentStreamEvent(event: AgentStreamEvent): boolean {
@@ -2055,6 +2120,13 @@ function shouldBufferCodexEventUntilTurnStarted(event: AgentStreamEvent): boolea
     return false;
   }
   return true;
+}
+
+function shouldSynthesizeTurnCompletionFromThreadStatus(input: {
+  statusType: string | null;
+  hasActiveRun: boolean;
+}): boolean {
+  return input.hasActiveRun && input.statusType === "idle";
 }
 
 class CodexAppServerAgentSession implements AgentSession {
@@ -2095,6 +2167,7 @@ class CodexAppServerAgentSession implements AgentSession {
   private warnedInvalidNotificationPayloads = new Set<string>();
   private warnedIncompleteEditToolCallIds = new Set<string>();
   private latestUsage: AgentUsage | undefined;
+  private runAwaitingTerminal = false;
   private connected = false;
   private collaborationModes: Array<{
     name: string;
@@ -2521,6 +2594,7 @@ class CodexAppServerAgentSession implements AgentSession {
       }
 
       await this.client.request("turn/start", params, TURN_START_TIMEOUT_MS);
+      this.runAwaitingTerminal = true;
 
       let sawTurnStarted = false;
       for await (const event of queue) {
@@ -2542,6 +2616,7 @@ class CodexAppServerAgentSession implements AgentSession {
         }
       }
     } finally {
+      this.runAwaitingTerminal = false;
       if (this.eventQueue === queue) {
         this.eventQueue = null;
       }
@@ -2875,6 +2950,31 @@ class CodexAppServerAgentSession implements AgentSession {
       return;
     }
 
+    if (parsed.kind === "thread_status_changed") {
+      if (
+        shouldSynthesizeTurnCompletionFromThreadStatus({
+          statusType: parsed.statusType,
+          hasActiveRun: this.runAwaitingTerminal,
+        })
+      ) {
+        this.runAwaitingTerminal = false;
+        this.currentTurnId = null;
+        this.emittedItemStartedIds.clear();
+        this.emittedItemCompletedIds.clear();
+        this.emittedExecCommandStartedCallIds.clear();
+        this.emittedExecCommandCompletedCallIds.clear();
+        this.pendingCommandOutputDeltas.clear();
+        this.pendingFileChangeOutputDeltas.clear();
+        this.warnedIncompleteEditToolCallIds.clear();
+        this.emitEvent({
+          type: "turn_completed",
+          provider: CODEX_PROVIDER,
+          usage: this.latestUsage,
+        });
+      }
+      return;
+    }
+
     if (parsed.kind === "turn_started") {
       this.currentTurnId = parsed.turnId;
       this.emittedItemStartedIds.clear();
@@ -2889,6 +2989,8 @@ class CodexAppServerAgentSession implements AgentSession {
     }
 
     if (parsed.kind === "turn_completed") {
+      this.runAwaitingTerminal = false;
+      this.currentTurnId = null;
       if (parsed.status === "failed") {
         this.emitEvent({
           type: "turn_failed",

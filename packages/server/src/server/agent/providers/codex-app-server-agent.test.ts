@@ -118,4 +118,27 @@ describe("Codex app-server provider", () => {
       }),
     ).toBe(true);
   });
+
+  test("only synthesizes completion from idle thread status while a run is active", () => {
+    expect(
+      __codexAppServerInternals.shouldSynthesizeTurnCompletionFromThreadStatus({
+        statusType: "idle",
+        hasActiveRun: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      __codexAppServerInternals.shouldSynthesizeTurnCompletionFromThreadStatus({
+        statusType: "idle",
+        hasActiveRun: false,
+      }),
+    ).toBe(false);
+
+    expect(
+      __codexAppServerInternals.shouldSynthesizeTurnCompletionFromThreadStatus({
+        statusType: "running",
+        hasActiveRun: true,
+      }),
+    ).toBe(false);
+  });
 });
