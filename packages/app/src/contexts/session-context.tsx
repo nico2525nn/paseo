@@ -49,7 +49,11 @@ import { derivePendingPermissionKey, normalizeAgentSnapshot } from "@/utils/agen
 import { resolveProjectPlacement } from "@/utils/project-placement";
 import { buildDraftStoreKey } from "@/stores/draft-keys";
 import type { AttachmentMetadata } from "@/attachments/types";
-import { takeQueuedAgentMessageReplay } from "@/contexts/session-queued-message-replay";
+import {
+  shouldAutoReplayQueuedAgentMessage,
+  takeQueuedAgentMessageReplay,
+  type QueuedAgentReplaySource,
+} from "@/contexts/session-queued-message-replay";
 
 // Re-export types from session-store and draft-store for backward compatibility
 export type { DraftInput } from "@/stores/draft-store";
@@ -355,7 +359,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
   );
 
   const applyAuthoritativeAgentSnapshot = useCallback(
-    (agent: Agent) => {
+    (agent: Agent, options?: { source?: QueuedAgentReplaySource }) => {
       setAgents(serverId, (prev) => {
         const current = prev.get(agent.id);
         if (current && agent.updatedAt.getTime() < current.updatedAt.getTime()) {
@@ -429,7 +433,13 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
       });
 
       const prevStatus = previousAgentStatusRef.current.get(agent.id);
-      if (prevStatus === "running" && agent.status !== "running") {
+      if (
+        shouldAutoReplayQueuedAgentMessage({
+          previousStatus: prevStatus,
+          nextStatus: agent.status,
+          source: options?.source ?? "live",
+        })
+      ) {
         const session = useSessionStore.getState().sessions[serverId];
         const replay = takeQueuedAgentMessageReplay(session?.queuedMessages.get(agent.id));
         if (replay) {
@@ -732,7 +742,7 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
         }),
       };
 
-      applyAuthoritativeAgentSnapshot(agent);
+      applyAuthoritativeAgentSnapshot(agent, { source: "live" });
     },
     [
       applyAuthoritativeAgentSnapshot,
@@ -782,10 +792,13 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
       if (payload.agent) {
         const normalized = normalizeAgentSnapshot(payload.agent, serverId);
-        applyAuthoritativeAgentSnapshot({
-          ...normalized,
-          projectPlacement: session?.agents.get(agentId)?.projectPlacement ?? null,
-        });
+        applyAuthoritativeAgentSnapshot(
+          {
+            ...normalized,
+            projectPlacement: session?.agents.get(agentId)?.projectPlacement ?? null,
+          },
+          { source: "hydrate" },
+        );
       }
 
       // Call pure reducer

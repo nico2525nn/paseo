@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { takeQueuedAgentMessageReplay } from "./session-queued-message-replay";
+import {
+  shouldAutoReplayQueuedAgentMessage,
+  takeQueuedAgentMessageReplay,
+} from "./session-queued-message-replay";
 
 describe("takeQueuedAgentMessageReplay", () => {
   it("preserves the queued message id for idempotent replay", () => {
@@ -46,5 +49,31 @@ describe("takeQueuedAgentMessageReplay", () => {
   it("returns null when the queue is empty", () => {
     expect(takeQueuedAgentMessageReplay([])).toBeNull();
     expect(takeQueuedAgentMessageReplay(undefined)).toBeNull();
+  });
+
+  it("only auto-replays queued messages for live running-to-idle transitions", () => {
+    expect(
+      shouldAutoReplayQueuedAgentMessage({
+        previousStatus: "running",
+        nextStatus: "idle",
+        source: "live",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldAutoReplayQueuedAgentMessage({
+        previousStatus: "running",
+        nextStatus: "idle",
+        source: "hydrate",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoReplayQueuedAgentMessage({
+        previousStatus: "idle",
+        nextStatus: "idle",
+        source: "live",
+      }),
+    ).toBe(false);
   });
 });

@@ -847,7 +847,6 @@ export class AgentManager {
     if (!agent || agent.internal) {
       return;
     }
-    this.touchUpdatedAt(agent);
     this.emitState(agent);
   }
 

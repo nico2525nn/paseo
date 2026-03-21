@@ -13,6 +13,16 @@ export interface QueuedAgentMessageReplay {
   remainingQueue: QueuedAgentMessageReplayItem[];
 }
 
+export type QueuedAgentReplaySource = "hydrate" | "live";
+
+export function shouldAutoReplayQueuedAgentMessage(input: {
+  previousStatus: string | undefined;
+  nextStatus: string;
+  source: QueuedAgentReplaySource;
+}): boolean {
+  return input.source === "live" && input.previousStatus === "running" && input.nextStatus !== "running";
+}
+
 export function takeQueuedAgentMessageReplay(
   queue: readonly QueuedAgentMessageReplayItem[] | undefined,
 ): QueuedAgentMessageReplay | null {
