@@ -17,6 +17,7 @@ export type KeyboardShortcutContext = {
   focusScope: KeyboardFocusScope;
   commandCenterOpen: boolean;
   hasSelectedAgent: boolean;
+  agentAwaitingInput: boolean;
 };
 
 export type KeyboardShortcutMatch = {
@@ -65,6 +66,8 @@ interface ShortcutWhen {
   commandCenter?: false;
   /** true = requires a selected agent */
   hasSelectedAgent?: true;
+  /** true = requires a visible prompt awaiting agent input */
+  agentAwaitingInput?: true;
   /** Exact focus scope match */
   focusScope?: KeyboardFocusScope;
 }
@@ -815,6 +818,48 @@ const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     },
   },
   {
+    id: "agent-prompt-select-1",
+    action: "agent.prompt.select",
+    combo: "1",
+    repeat: false,
+    when: { agentAwaitingInput: true, focusScope: "other", commandCenter: false },
+    payload: { type: "index" },
+    help: {
+      id: "agent-prompt-select-1",
+      section: "agent-input",
+      label: "Select prompt option 1",
+      keys: ["1"],
+    },
+  },
+  {
+    id: "agent-prompt-select-2",
+    action: "agent.prompt.select",
+    combo: "2",
+    repeat: false,
+    when: { agentAwaitingInput: true, focusScope: "other", commandCenter: false },
+    payload: { type: "index" },
+    help: {
+      id: "agent-prompt-select-2",
+      section: "agent-input",
+      label: "Select prompt option 2",
+      keys: ["2"],
+    },
+  },
+  {
+    id: "agent-prompt-select-3",
+    action: "agent.prompt.select",
+    combo: "3",
+    repeat: false,
+    when: { agentAwaitingInput: true, focusScope: "other", commandCenter: false },
+    payload: { type: "index" },
+    help: {
+      id: "agent-prompt-select-3",
+      section: "agent-input",
+      label: "Select prompt option 3",
+      keys: ["3"],
+    },
+  },
+  {
     id: "message-input-send-enter",
     action: "message-input.action",
     combo: "Enter",
@@ -964,6 +1009,7 @@ function matchesWhen(when: ShortcutWhen | undefined, context: KeyboardShortcutCo
   if (when.terminal === false && context.focusScope === "terminal") return false;
   if (when.commandCenter === false && context.commandCenterOpen) return false;
   if (when.hasSelectedAgent === true && !context.hasSelectedAgent) return false;
+  if (when.agentAwaitingInput === true && !context.agentAwaitingInput) return false;
   if (when.focusScope !== undefined && context.focusScope !== when.focusScope) return false;
   return true;
 }

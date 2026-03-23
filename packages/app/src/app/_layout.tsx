@@ -44,6 +44,7 @@ import { DownloadToast } from "@/components/download-toast";
 import { UpdateBanner } from "@/desktop/updates/update-banner";
 import { ToastProvider } from "@/contexts/toast-context";
 import { usePanelStore } from "@/stores/panel-store";
+import { useSessionStore } from "@/stores/session-store";
 import { runOnJS, interpolate, Extrapolation, useSharedValue } from "react-native-reanimated";
 import {
   SidebarAnimationProvider,
@@ -255,6 +256,22 @@ interface AppContainerProps {
   chromeEnabled?: boolean;
 }
 
+function parseSelectedAgentKey(
+  selectedAgentKey: string | undefined,
+): { serverId: string; agentId: string } | null {
+  if (!selectedAgentKey) {
+    return null;
+  }
+  const separatorIndex = selectedAgentKey.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex >= selectedAgentKey.length - 1) {
+    return null;
+  }
+  return {
+    serverId: selectedAgentKey.slice(0, separatorIndex),
+    agentId: selectedAgentKey.slice(separatorIndex + 1),
+  };
+}
+
 function AppContainer({
   children,
   selectedAgentId,
@@ -267,6 +284,22 @@ function AppContainer({
   const toggleBothSidebars = usePanelStore((state) => state.toggleBothSidebars);
   const toggleFocusMode = usePanelStore((state) => state.toggleFocusMode);
   const isFocusModeEnabled = usePanelStore((state) => state.desktop.focusModeEnabled);
+  const selectedAgent = useMemo(() => parseSelectedAgentKey(selectedAgentId), [selectedAgentId]);
+  const agentAwaitingInput = useSessionStore((state) => {
+    if (!selectedAgent) {
+      return false;
+    }
+    const pendingPermissions = state.sessions[selectedAgent.serverId]?.pendingPermissions;
+    if (!pendingPermissions) {
+      return false;
+    }
+    for (const permission of pendingPermissions.values()) {
+      if (permission.agentId === selectedAgent.agentId) {
+        return true;
+      }
+    }
+    return false;
+  });
 
   const isMobile = UnistylesRuntime.breakpoint === "xs" || UnistylesRuntime.breakpoint === "sm";
   const chromeEnabled = chromeEnabledOverride ?? daemons.length > 0;
@@ -276,6 +309,7 @@ function AppContainer({
     isMobile,
     toggleAgentList,
     selectedAgentId,
+    agentAwaitingInput,
     toggleFileExplorer,
     toggleBothSidebars,
     toggleFocusMode,

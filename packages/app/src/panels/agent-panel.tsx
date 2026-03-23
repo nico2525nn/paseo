@@ -22,9 +22,11 @@ import { useArchiveAgent } from "@/hooks/use-archive-agent";
 import { useDelayedHistoryRefreshToast } from "@/hooks/use-delayed-history-refresh-toast";
 import { useAgentInputDraft } from "@/hooks/use-agent-input-draft";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import { usePaneContext } from "@/panels/pane-context";
 import type { PanelDescriptor, PanelRegistration } from "@/panels/panel-registry";
+import type { KeyboardActionDefinition } from "@/keyboard/keyboard-action-dispatcher";
 import {
   useHostRuntimeClient,
   useHostRuntimeConnectionStatus,
@@ -322,6 +324,26 @@ function AgentPanelBody({
     attentionReason: agent?.attentionReason,
     isScreenFocused: isPaneFocused,
   });
+
+  const handlePromptShortcut = useCallback(
+    (action: KeyboardActionDefinition): boolean => {
+      if (!isPaneFocused || action.id !== "agent.prompt.select") {
+        return false;
+      }
+      return streamViewRef.current?.selectPendingPermissionOption(action.index) ?? false;
+    },
+    [isPaneFocused],
+  );
+
+  useKeyboardActionHandler({
+    handlerId: `agent-prompt-actions:${serverId}:${agentId ?? "__pending__"}`,
+    actions: ["agent.prompt.select"],
+    enabled: Boolean(agentId),
+    priority: 150,
+    isActive: () => isPaneFocused,
+    handle: handlePromptShortcut,
+  });
+
   useEffect(() => {
     clearOnAgentBlurRef.current = attentionController.clearOnAgentBlur;
   }, [attentionController.clearOnAgentBlur]);
