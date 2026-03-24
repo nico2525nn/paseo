@@ -170,7 +170,8 @@ describe("workspace git watch targets", () => {
       isBootstrapping: false,
       pendingUpdatesByWorkspaceId: new Map(),
     };
-    sessionAny.reconcileActiveWorkspaceRecords = async () => new Set();
+    sessionAny.workspaceReconciliationService.reconcileActiveWorkspaceRecords = async () =>
+      new Set();
 
     let descriptor = {
       id: "/tmp/repo",

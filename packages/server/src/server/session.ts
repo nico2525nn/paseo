@@ -99,11 +99,7 @@ import { AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
 import { isValidAgentProvider, AGENT_PROVIDER_IDS } from "./agent/provider-manifest.js";
 import {
   buildProjectPlacementForCwd,
-  detectStaleWorkspaces,
-  deriveProjectKind,
-  deriveProjectRootPath,
   deriveWorkspaceDisplayName,
-  deriveWorkspaceKind,
   normalizeWorkspaceId as normalizePersistedWorkspaceId,
 } from "./workspace-registry-model.js";
 import type {
@@ -112,10 +108,7 @@ import type {
   ProjectRegistry,
   WorkspaceRegistry,
 } from "./workspace-registry.js";
-import {
-  createPersistedProjectRecord,
-  createPersistedWorkspaceRecord,
-} from "./workspace-registry.js";
+import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
 import {
   buildVoiceAgentMcpServerConfig,
   buildVoiceModeSystemPrompt,
@@ -400,6 +393,7 @@ export type SessionOptions = {
   agentStorage: AgentStorage;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
+  workspaceReconciliationService?: WorkspaceReconciliationService;
   createAgentMcpTransport: AgentMcpTransportFactory;
   stt: Resolvable<SpeechToTextProvider | null>;
   tts: Resolvable<TextToSpeechProvider | null>;
@@ -583,6 +577,7 @@ export class Session {
   private readonly agentStorage: AgentStorage;
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
+  private readonly workspaceReconciliationService: WorkspaceReconciliationService;
   private readonly createAgentMcpTransport: AgentMcpTransportFactory;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly pushTokenStore: PushTokenStore;
@@ -643,6 +638,7 @@ export class Session {
       agentStorage,
       projectRegistry,
       workspaceRegistry,
+      workspaceReconciliationService,
       createAgentMcpTransport,
       stt,
       tts,
@@ -665,6 +661,17 @@ export class Session {
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry;
     this.workspaceRegistry = workspaceRegistry;
+    this.workspaceReconciliationService =
+      workspaceReconciliationService ??
+      new WorkspaceReconciliationService({
+        projectRegistry: this.projectRegistry,
+        workspaceRegistry: this.workspaceRegistry,
+        agentStorage: this.agentStorage,
+        buildProjectPlacement: async (cwd) => this.buildProjectPlacement(cwd),
+        syncWorkspaceGitWatchTarget: async (cwd, options) =>
+          this.syncWorkspaceGitWatchTarget(cwd, options),
+        removeWorkspaceGitWatchTarget: async (cwd) => this.removeWorkspaceGitWatchTarget(cwd),
+      });
     this.createAgentMcpTransport = createAgentMcpTransport;
     this.terminalManager = terminalManager;
     if (this.terminalManager) {
@@ -1260,155 +1267,15 @@ export class Session {
     });
   }
 
-  private buildPersistedProjectRecord(input: {
-    workspaceId: string;
-    placement: ProjectPlacementPayload;
-    createdAt: string;
-    updatedAt: string;
-  }): PersistedProjectRecord {
-    return createPersistedProjectRecord({
-      projectId: input.placement.projectKey,
-      rootPath: deriveProjectRootPath({
-        cwd: input.workspaceId,
-        checkout: input.placement.checkout,
-      }),
-      kind: deriveProjectKind(input.placement.checkout),
-      displayName: input.placement.projectName,
-      createdAt: input.createdAt,
-      updatedAt: input.updatedAt,
-      archivedAt: null,
-    });
-  }
-
-  private buildPersistedWorkspaceRecord(input: {
-    workspaceId: string;
-    placement: ProjectPlacementPayload;
-    createdAt: string;
-    updatedAt: string;
-  }): PersistedWorkspaceRecord {
-    return createPersistedWorkspaceRecord({
-      workspaceId: input.workspaceId,
-      projectId: input.placement.projectKey,
-      cwd: input.workspaceId,
-      kind: deriveWorkspaceKind(input.placement.checkout),
-      displayName: deriveWorkspaceDisplayName({
-        cwd: input.workspaceId,
-        checkout: input.placement.checkout,
-      }),
-      createdAt: input.createdAt,
-      updatedAt: input.updatedAt,
-      archivedAt: null,
-    });
-  }
-
-  private async archiveProjectRecordIfEmpty(projectId: string, archivedAt: string): Promise<void> {
-    const siblingWorkspaces = (await this.workspaceRegistry.list()).filter(
-      (workspace) => workspace.projectId === projectId && !workspace.archivedAt,
-    );
-    if (siblingWorkspaces.length === 0) {
-      await this.projectRegistry.archive(projectId, archivedAt);
-    }
-  }
-
   private async reconcileWorkspaceRecord(workspaceId: string): Promise<{
     workspace: PersistedWorkspaceRecord;
     changed: boolean;
   }> {
-    const normalizedWorkspaceId = normalizePersistedWorkspaceId(workspaceId);
-    const existing = await this.workspaceRegistry.get(normalizedWorkspaceId);
-    const placement = await this.buildProjectPlacement(normalizedWorkspaceId);
-    await this.syncWorkspaceGitWatchTarget(normalizedWorkspaceId, {
-      isGit: placement.checkout.isGit,
-    });
-    const now = new Date().toISOString();
-    const nextProjectCreatedAt = existing?.createdAt ?? now;
-    const nextWorkspaceCreatedAt = existing?.createdAt ?? now;
-    const currentProjectRecord = await this.projectRegistry.get(placement.projectKey);
-    const nextProjectRecord = this.buildPersistedProjectRecord({
-      workspaceId: normalizedWorkspaceId,
-      placement,
-      createdAt: currentProjectRecord?.createdAt ?? nextProjectCreatedAt,
-      updatedAt: now,
-    });
-    const nextWorkspaceRecord = this.buildPersistedWorkspaceRecord({
-      workspaceId: normalizedWorkspaceId,
-      placement,
-      createdAt: nextWorkspaceCreatedAt,
-      updatedAt: now,
-    });
-
-    const needsWorkspaceUpdate =
-      !existing ||
-      existing.archivedAt ||
-      existing.projectId !== nextWorkspaceRecord.projectId ||
-      existing.kind !== nextWorkspaceRecord.kind ||
-      existing.displayName !== nextWorkspaceRecord.displayName;
-
-    const needsProjectUpdate =
-      !currentProjectRecord ||
-      currentProjectRecord.archivedAt ||
-      currentProjectRecord.rootPath !== nextProjectRecord.rootPath ||
-      currentProjectRecord.kind !== nextProjectRecord.kind ||
-      currentProjectRecord.displayName !== nextProjectRecord.displayName;
-
-    if (!needsWorkspaceUpdate && !needsProjectUpdate) {
-      return {
-        workspace: existing!,
-        changed: false,
-      };
-    }
-
-    await this.projectRegistry.upsert(nextProjectRecord);
-    await this.workspaceRegistry.upsert(nextWorkspaceRecord);
-
-    if (existing && !existing.archivedAt && existing.projectId !== nextWorkspaceRecord.projectId) {
-      await this.archiveProjectRecordIfEmpty(existing.projectId, now);
-    }
-
-    return {
-      workspace: nextWorkspaceRecord,
-      changed: true,
-    };
+    return this.workspaceReconciliationService.reconcileWorkspaceRecord(workspaceId);
   }
 
   private async reconcileActiveWorkspaceRecords(): Promise<Set<string>> {
-    const changedWorkspaceIds = new Set<string>();
-    const activeWorkspaces = (await this.workspaceRegistry.list()).filter(
-      (workspace) => !workspace.archivedAt,
-    );
-    const staleWorkspaceIds = await detectStaleWorkspaces({
-      activeWorkspaces,
-      agentRecords: (await this.agentStorage.list()).map((agent) => ({
-        cwd: agent.cwd,
-        archivedAt: agent.archivedAt ?? null,
-      })),
-      checkDirectoryExists: async (cwd) => {
-        try {
-          await stat(cwd);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    });
-
-    for (const workspaceId of staleWorkspaceIds) {
-      await this.archiveWorkspaceRecord(workspaceId);
-      changedWorkspaceIds.add(workspaceId);
-    }
-
-    for (const workspace of activeWorkspaces) {
-      if (staleWorkspaceIds.has(workspace.workspaceId)) {
-        continue;
-      }
-
-      const result = await this.reconcileWorkspaceRecord(workspace.workspaceId);
-      if (result.changed) {
-        changedWorkspaceIds.add(result.workspace.workspaceId);
-      }
-    }
-
-    return changedWorkspaceIds;
+    return this.workspaceReconciliationService.reconcileActiveWorkspaceRecords();
   }
 
   private async forwardAgentUpdate(agent: ManagedAgent): Promise<void> {
@@ -5837,69 +5704,11 @@ export class Session {
     worktreePath: string;
     branchName: string;
   }): Promise<PersistedWorkspaceRecord> {
-    const workspaceId = normalizePersistedWorkspaceId(options.worktreePath);
-    const basePlacement = await this.buildProjectPlacement(options.repoRoot);
-    const placement: ProjectPlacementPayload = {
-      ...basePlacement,
-      checkout: {
-        cwd: workspaceId,
-        isGit: true,
-        currentBranch: options.branchName,
-        remoteUrl: basePlacement.checkout.remoteUrl,
-        isPaseoOwnedWorktree: true,
-        mainRepoRoot: options.repoRoot,
-      },
-    };
-    const now = new Date().toISOString();
-    const existingWorkspace = await this.workspaceRegistry.get(workspaceId);
-    const existingProject = await this.projectRegistry.get(placement.projectKey);
-    const nextProjectRecord = this.buildPersistedProjectRecord({
-      workspaceId,
-      placement,
-      createdAt: existingProject?.createdAt ?? now,
-      updatedAt: now,
-    });
-    const nextWorkspaceRecord = this.buildPersistedWorkspaceRecord({
-      workspaceId,
-      placement,
-      createdAt: existingWorkspace?.createdAt ?? now,
-      updatedAt: now,
-    });
-
-    await this.projectRegistry.upsert(nextProjectRecord);
-    await this.workspaceRegistry.upsert(nextWorkspaceRecord);
-    await this.syncWorkspaceGitWatchTarget(workspaceId, {
-      isGit: placement.checkout.isGit,
-    });
-
-    if (
-      existingWorkspace &&
-      !existingWorkspace.archivedAt &&
-      existingWorkspace.projectId !== nextWorkspaceRecord.projectId
-    ) {
-      await this.archiveProjectRecordIfEmpty(existingWorkspace.projectId, now);
-    }
-
-    return nextWorkspaceRecord;
+    return this.workspaceReconciliationService.registerPendingWorktreeWorkspace(options);
   }
 
   private async archiveWorkspaceRecord(workspaceId: string, archivedAt?: string): Promise<void> {
-    const existing = await this.workspaceRegistry.get(workspaceId);
-    if (!existing || existing.archivedAt) {
-      this.removeWorkspaceGitWatchTarget(workspaceId);
-      return;
-    }
-
-    const nextArchivedAt = archivedAt ?? new Date().toISOString();
-    await this.workspaceRegistry.archive(workspaceId, nextArchivedAt);
-    this.removeWorkspaceGitWatchTarget(workspaceId);
-
-    const siblingWorkspaces = (await this.workspaceRegistry.list()).filter(
-      (workspace) => workspace.projectId === existing.projectId && !workspace.archivedAt,
-    );
-    if (siblingWorkspaces.length === 0) {
-      await this.projectRegistry.archive(existing.projectId, nextArchivedAt);
-    }
+    await this.workspaceReconciliationService.archiveWorkspaceRecord(workspaceId, archivedAt);
   }
 
   private async emitWorkspaceUpdateForCwd(

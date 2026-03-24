@@ -292,7 +292,7 @@ describe("workspace aggregation", () => {
       isBootstrapping: false,
       pendingUpdatesByWorkspaceId: new Map(),
     };
-    session.reconcileActiveWorkspaceRecords = async () => new Set();
+    session.workspaceReconciliationService.reconcileActiveWorkspaceRecords = async () => new Set();
 
     session.listWorkspaceDescriptorsSnapshot = async () => [
       {
@@ -411,7 +411,7 @@ describe("workspace aggregation", () => {
       isBootstrapping: false,
       pendingUpdatesByWorkspaceId: new Map(),
     };
-    session.reconcileActiveWorkspaceRecords = async () =>
+    session.workspaceReconciliationService.reconcileActiveWorkspaceRecords = async () =>
       new Set(["/tmp/repo", "/tmp/repo/worktree"]);
     session.listWorkspaceDescriptorsSnapshot = async () => [
       {
