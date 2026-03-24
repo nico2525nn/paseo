@@ -1,5 +1,8 @@
+import type pino from "pino";
+
 import type { AgentProvider, AgentSessionConfig } from "./agent/agent-sdk-types.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
+import { isValidAgentProvider } from "./agent/provider-manifest.js";
 
 function isKnownProvider(provider: string): provider is AgentProvider {
   return provider === "claude" || provider === "codex" || provider === "opencode";
@@ -33,6 +36,30 @@ export function buildSessionConfig(record: StoredAgentRecord): AgentSessionConfi
     extra: overrides.extra,
     systemPrompt: overrides.systemPrompt,
     mcpServers: overrides.mcpServers,
+  };
+}
+
+export function toAgentPersistenceHandle(
+  logger: pino.Logger,
+  handle: StoredAgentRecord["persistence"],
+) {
+  if (!handle) {
+    return null;
+  }
+  const provider = handle.provider;
+  if (!isValidAgentProvider(provider)) {
+    logger.warn({ provider }, `Ignoring persistence handle with unknown provider '${provider}'`);
+    return null;
+  }
+  if (!handle.sessionId) {
+    logger.warn("Ignoring persistence handle missing sessionId");
+    return null;
+  }
+  return {
+    provider,
+    sessionId: handle.sessionId,
+    nativeHandle: handle.nativeHandle,
+    metadata: handle.metadata,
   };
 }
 

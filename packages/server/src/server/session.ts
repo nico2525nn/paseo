@@ -54,9 +54,7 @@ import {
   type VoiceTurnController,
 } from "./voice/voice-turn-controller.js";
 import {
-  buildConfigOverrides,
-  buildSessionConfig,
-  extractTimestamps,
+  toAgentPersistenceHandle,
 } from "./persistence-hooks.js";
 import { experimental_createMCPClient } from "ai";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -109,6 +107,7 @@ import type {
   WorkspaceRegistry,
 } from "./workspace-registry.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
+import { ProviderHistoryCompatibilityService } from "./provider-history-compatibility-service.js";
 import {
   buildVoiceAgentMcpServerConfig,
   buildVoiceModeSystemPrompt,
@@ -172,7 +171,6 @@ const READ_ONLY_GIT_ENV: NodeJS.ProcessEnv = {
   ...process.env,
   GIT_OPTIONAL_LOCKS: "0",
 };
-const pendingAgentInitializations = new Map<string, Promise<ManagedAgent>>();
 const DEFAULT_AGENT_PROVIDER = AGENT_PROVIDER_IDS[0];
 const CHECKOUT_DIFF_WATCH_DEBOUNCE_MS = 150;
 const CHECKOUT_DIFF_FALLBACK_REFRESH_MS = 5_000;
@@ -394,6 +392,7 @@ export type SessionOptions = {
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
   workspaceReconciliationService?: WorkspaceReconciliationService;
+  providerHistoryCompatibilityService?: ProviderHistoryCompatibilityService;
   createAgentMcpTransport: AgentMcpTransportFactory;
   stt: Resolvable<SpeechToTextProvider | null>;
   tts: Resolvable<TextToSpeechProvider | null>;
@@ -502,30 +501,6 @@ function coerceAgentProvider(logger: pino.Logger, value: string, agentId?: strin
   return DEFAULT_AGENT_PROVIDER;
 }
 
-function toAgentPersistenceHandle(
-  logger: pino.Logger,
-  handle: StoredAgentRecord["persistence"],
-): AgentPersistenceHandle | null {
-  if (!handle) {
-    return null;
-  }
-  const provider = handle.provider;
-  if (!isValidAgentProvider(provider)) {
-    logger.warn({ provider }, `Ignoring persistence handle with unknown provider '${provider}'`);
-    return null;
-  }
-  if (!handle.sessionId) {
-    logger.warn("Ignoring persistence handle missing sessionId");
-    return null;
-  }
-  return {
-    provider,
-    sessionId: handle.sessionId,
-    nativeHandle: handle.nativeHandle,
-    metadata: handle.metadata,
-  } satisfies AgentPersistenceHandle;
-}
-
 /**
  * Session represents a single connected client session.
  * It owns all state management, orchestration logic, and message processing.
@@ -578,6 +553,7 @@ export class Session {
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly workspaceReconciliationService: WorkspaceReconciliationService;
+  private readonly providerHistoryCompatibilityService: ProviderHistoryCompatibilityService;
   private readonly createAgentMcpTransport: AgentMcpTransportFactory;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly pushTokenStore: PushTokenStore;
@@ -639,6 +615,7 @@ export class Session {
       projectRegistry,
       workspaceRegistry,
       workspaceReconciliationService,
+      providerHistoryCompatibilityService,
       createAgentMcpTransport,
       stt,
       tts,
@@ -657,6 +634,11 @@ export class Session {
     this.downloadTokenStore = downloadTokenStore;
     this.pushTokenStore = pushTokenStore;
     this.paseoHome = paseoHome;
+    this.sessionLogger = logger.child({
+      module: "session",
+      clientId: this.clientId,
+      sessionId: this.sessionId,
+    });
     this.agentManager = agentManager;
     this.agentStorage = agentStorage;
     this.projectRegistry = projectRegistry;
@@ -671,6 +653,13 @@ export class Session {
         syncWorkspaceGitWatchTarget: async (cwd, options) =>
           this.syncWorkspaceGitWatchTarget(cwd, options),
         removeWorkspaceGitWatchTarget: async (cwd) => this.removeWorkspaceGitWatchTarget(cwd),
+      });
+    this.providerHistoryCompatibilityService =
+      providerHistoryCompatibilityService ??
+      new ProviderHistoryCompatibilityService({
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
       });
     this.createAgentMcpTransport = createAgentMcpTransport;
     this.terminalManager = terminalManager;
@@ -699,11 +688,6 @@ export class Session {
     this.getSpeechReadiness = dictation?.getSpeechReadiness;
     this.agentProviderRuntimeSettings = agentProviderRuntimeSettings;
     this.abortController = new AbortController();
-    this.sessionLogger = logger.child({
-      module: "session",
-      clientId: this.clientId,
-      sessionId: this.sessionId,
-    });
     this.providerRegistry = buildProviderRegistry(this.sessionLogger, {
       runtimeSettings: this.agentProviderRuntimeSettings,
     });
@@ -1097,58 +1081,7 @@ export class Session {
   }
 
   private async ensureAgentLoaded(agentId: string): Promise<ManagedAgent> {
-    const existing = this.agentManager.getAgent(agentId);
-    if (existing) {
-      return existing;
-    }
-
-    const inflight = pendingAgentInitializations.get(agentId);
-    if (inflight) {
-      return inflight;
-    }
-
-    const initPromise = (async () => {
-      const record = await this.agentStorage.get(agentId);
-      if (!record) {
-        throw new Error(`Agent not found: ${agentId}`);
-      }
-
-      const handle = toAgentPersistenceHandle(this.sessionLogger, record.persistence);
-      let snapshot: ManagedAgent;
-      if (handle) {
-        snapshot = await this.agentManager.resumeAgentFromPersistence(
-          handle,
-          buildConfigOverrides(record),
-          agentId,
-          extractTimestamps(record),
-        );
-        this.sessionLogger.info(
-          { agentId, provider: record.provider },
-          "Agent resumed from persistence",
-        );
-      } else {
-        const config = buildSessionConfig(record);
-        snapshot = await this.agentManager.createAgent(config, agentId, { labels: record.labels });
-        this.sessionLogger.info(
-          { agentId, provider: record.provider },
-          "Agent created from stored config",
-        );
-      }
-
-      await this.agentManager.hydrateTimelineFromProvider(agentId);
-      return this.agentManager.getAgent(agentId) ?? snapshot;
-    })();
-
-    pendingAgentInitializations.set(agentId, initPromise);
-
-    try {
-      return await initPromise;
-    } finally {
-      const current = pendingAgentInitializations.get(agentId);
-      if (current === initPromise) {
-        pendingAgentInitializations.delete(agentId);
-      }
-    }
+    return this.providerHistoryCompatibilityService.ensureAgentLoaded({ agentId });
   }
 
   private matchesAgentFilter(options: {
@@ -2547,9 +2480,11 @@ export class Session {
     );
     try {
       await this.unarchiveAgentByHandle(handle);
-      const snapshot = await this.agentManager.resumeAgentFromPersistence(handle, overrides);
+      const snapshot = await this.providerHistoryCompatibilityService.resumeAgent({
+        handle,
+        overrides,
+      });
       await this.unarchiveAgentState(snapshot.id);
-      await this.agentManager.hydrateTimelineFromProvider(snapshot.id);
       await this.forwardAgentUpdate(snapshot);
       const timelineSize = this.agentManager.getTimeline(snapshot.id).length;
       if (requestId) {
@@ -2590,32 +2525,10 @@ export class Session {
 
     try {
       await this.unarchiveAgentState(agentId);
-      let snapshot: ManagedAgent;
-      const existing = this.agentManager.getAgent(agentId);
-      if (existing) {
+      if (this.agentManager.getAgent(agentId)) {
         await this.interruptAgentIfRunning(agentId);
-        if (existing.persistence) {
-          snapshot = await this.agentManager.reloadAgentSession(agentId);
-        } else {
-          snapshot = existing;
-        }
-      } else {
-        const record = await this.agentStorage.get(agentId);
-        if (!record) {
-          throw new Error(`Agent not found: ${agentId}`);
-        }
-        const handle = toAgentPersistenceHandle(this.sessionLogger, record.persistence);
-        if (!handle) {
-          throw new Error(`Agent ${agentId} cannot be refreshed because it lacks persistence`);
-        }
-        snapshot = await this.agentManager.resumeAgentFromPersistence(
-          handle,
-          buildConfigOverrides(record),
-          agentId,
-          extractTimestamps(record),
-        );
       }
-      await this.agentManager.hydrateTimelineFromProvider(agentId);
+      const snapshot = await this.providerHistoryCompatibilityService.refreshAgent({ agentId });
       await this.forwardAgentUpdate(snapshot);
       const timelineSize = this.agentManager.getTimeline(agentId).length;
       if (requestId) {
