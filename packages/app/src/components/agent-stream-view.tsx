@@ -5,8 +5,8 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useRef,
   useState,
+  useRef,
 } from "react";
 import { View, Text, Pressable, Platform, ActivityIndicator } from "react-native";
 import Markdown from "react-native-markdown-display";
@@ -36,17 +36,16 @@ import {
   MessageOuterSpacingProvider,
   type InlinePathTarget,
 } from "./message";
-import { Shortcut } from "./ui/shortcut";
 import type { StreamItem } from "@/types/stream";
 import type { PendingPermission } from "@/types/shared";
 import type { AgentPermissionResponse } from "@server/server/agent/agent-sdk-types";
 import type { Agent } from "@/contexts/session-context";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileExplorerActions } from "@/hooks/use-file-explorer-actions";
-import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
+import { useKeyboardActionHandler } from "@/hooks/use-keyboard-action-handler";
 import type { DaemonClient } from "@server/client/daemon-client";
 import { ToolCallDetailsContent } from "./tool-call-details";
-import { QuestionFormCard, type QuestionFormCardHandle } from "./question-form-card";
+import { QuestionFormCard } from "./question-form-card";
 import { ToolCallSheetProvider } from "./tool-call-sheet";
 import {
   buildAgentStreamRenderModel,
@@ -79,11 +78,6 @@ const isToolSequenceItem = (item?: StreamItem) =>
 export interface AgentStreamViewHandle {
   scrollToBottom(reason?: BottomAnchorLocalRequest["reason"]): void;
   prepareForViewportChange(): void;
-  selectPendingPermissionOption(index: number): boolean;
-}
-
-interface PermissionRequestCardHandle {
-  selectOption(index: number): boolean;
 }
 
 export interface AgentStreamViewProps {
@@ -92,6 +86,7 @@ export interface AgentStreamViewProps {
   agent: Agent;
   streamItems: StreamItem[];
   pendingPermissions: Map<string, PendingPermission>;
+  isPaneFocused?: boolean;
   routeBottomAnchorRequest?: BottomAnchorRouteRequest | null;
   isAuthoritativeHistoryReady?: boolean;
   onOpenWorkspaceFile?: (input: { filePath: string }) => void;
@@ -105,6 +100,7 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       agent,
       streamItems,
       pendingPermissions,
+      isPaneFocused = false,
       routeBottomAnchorRequest = null,
       isAuthoritativeHistoryReady = true,
       onOpenWorkspaceFile,
@@ -112,7 +108,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
     ref,
   ) {
     const viewportRef = useRef<StreamViewportHandle | null>(null);
-    const permissionCardRefs = useRef(new Map<string, PermissionRequestCardHandle>());
     const { theme } = useUnistyles();
     const router = useRouter();
     const isMobile = UnistylesRuntime.breakpoint === "xs" || UnistylesRuntime.breakpoint === "sm";
@@ -238,15 +233,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         prepareForViewportChange() {
           viewportRef.current?.prepareForViewportChange();
         },
-        selectPendingPermissionOption(index: number) {
-          const topPermission = pendingPermissionItems[0];
-          if (!topPermission) {
-            return false;
-          }
-          return permissionCardRefs.current.get(topPermission.key)?.selectOption(index) ?? false;
-        },
       }),
-      [pendingPermissionItems],
+      [],
     );
 
     function scrollToBottom() {
@@ -514,18 +502,12 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
       const pendingPermissionsNode =
         pendingPermissionItems.length > 0 ? (
           <View style={stylesheet.permissionsContainer}>
-            {pendingPermissionItems.map((permission) => (
+            {pendingPermissionItems.map((permission, index) => (
               <PermissionRequestCard
                 key={permission.key}
-                ref={(handle) => {
-                  if (handle) {
-                    permissionCardRefs.current.set(permission.key, handle);
-                    return;
-                  }
-                  permissionCardRefs.current.delete(permission.key);
-                }}
                 permission={permission}
                 client={client}
+                shortcutActive={isPaneFocused && index === 0}
               />
             ))}
           </View>
@@ -550,7 +532,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           workingIndicator: workingIndicatorNode,
         },
       };
-    }, [baseRenderModel, client, getGapBetween, pendingPermissionItems, showWorkingIndicator]);
+    }, [
+      baseRenderModel,
+      client,
+      getGapBetween,
+      isPaneFocused,
+      pendingPermissionItems,
+      showWorkingIndicator,
+    ]);
 
     const listEmptyComponent = useMemo(() => {
       if (
@@ -749,18 +738,17 @@ function WorkingIndicator() {
 }
 
 // Permission Request Card Component
-const PermissionRequestCard = forwardRef<
-  PermissionRequestCardHandle,
-  {
-    permission: PendingPermission;
-    client: DaemonClient | null;
-  }
->(function PermissionRequestCard({ permission, client }, ref) {
+function PermissionRequestCard({
+  permission,
+  client,
+  shortcutActive,
+}: {
+  permission: PendingPermission;
+  client: DaemonClient | null;
+  shortcutActive: boolean;
+}) {
   const { theme } = useUnistyles();
   const isMobile = UnistylesRuntime.breakpoint === "xs" || UnistylesRuntime.breakpoint === "sm";
-  const questionFormRef = useRef<QuestionFormCardHandle | null>(null);
-  const firstOptionShortcut = useShortcutKeys("agent-prompt-select-1");
-  const secondOptionShortcut = useShortcutKeys("agent-prompt-select-2");
 
   const { request } = permission;
   const isPlanRequest = request.kind === "plan";
@@ -920,37 +908,39 @@ const PermissionRequestCard = forwardRef<
     handleResponse({ behavior: "allow" });
   }, [handleResponse]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      selectOption(index: number) {
-        if (isResponding) {
-          return false;
-        }
-        if (request.kind === "question") {
-          return questionFormRef.current?.selectOption(index) ?? false;
-        }
-        if (index === 1) {
-          handleDeny();
-          return true;
-        }
-        if (index === 2) {
-          handleAccept();
-          return true;
-        }
+  const handlePromptSelection = useCallback(
+    (action: { id: string; index?: number }): boolean => {
+      if (action.id !== "agent.prompt.select" || request.kind === "question" || isResponding) {
         return false;
-      },
-    }),
+      }
+      if (action.index === 1) {
+        handleDeny();
+        return true;
+      }
+      if (action.index === 2) {
+        handleAccept();
+        return true;
+      }
+      return false;
+    },
     [handleAccept, handleDeny, isResponding, request.kind],
   );
+
+  useKeyboardActionHandler({
+    handlerId: `agent-prompt-permission:${permission.key}`,
+    actions: ["agent.prompt.select"],
+    enabled: shortcutActive && request.kind !== "question" && !isResponding,
+    priority: 150,
+    handle: handlePromptSelection,
+  });
 
   if (request.kind === "question") {
     return (
       <QuestionFormCard
-        ref={questionFormRef}
         permission={permission}
         onRespond={handleResponse}
         isResponding={isResponding}
+        shortcutActive={shortcutActive}
       />
     );
   }
@@ -1033,9 +1023,6 @@ const PermissionRequestCard = forwardRef<
               <Text style={[permissionStyles.optionText, { color: theme.colors.foregroundMuted }]}>
                 Deny
               </Text>
-              {firstOptionShortcut ? (
-                <Shortcut chord={firstOptionShortcut} style={permissionStyles.optionShortcut} />
-              ) : null}
             </View>
           )}
         </Pressable>
@@ -1061,16 +1048,13 @@ const PermissionRequestCard = forwardRef<
               <Text style={[permissionStyles.optionText, { color: theme.colors.foreground }]}>
                 Accept
               </Text>
-              {secondOptionShortcut ? (
-                <Shortcut chord={secondOptionShortcut} style={permissionStyles.optionShortcut} />
-              ) : null}
             </View>
           )}
         </Pressable>
       </View>
     </View>
   );
-});
+}
 
 const stylesheet = StyleSheet.create((theme) => ({
   container: {
@@ -1253,7 +1237,6 @@ const permissionStyles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[2],
   },
-  optionShortcut: {},
   optionText: {
     fontSize: theme.fontSize.sm,
     fontWeight: theme.fontWeight.normal,

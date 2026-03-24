@@ -32,7 +32,6 @@ export function useKeyboardShortcuts({
   isMobile,
   toggleAgentList,
   selectedAgentId,
-  agentAwaitingInput,
   toggleFileExplorer,
   toggleBothSidebars,
   toggleFocusMode,
@@ -41,7 +40,6 @@ export function useKeyboardShortcuts({
   isMobile: boolean;
   toggleAgentList: () => void;
   selectedAgentId?: string;
-  agentAwaitingInput: boolean;
   toggleFileExplorer?: () => void;
   toggleBothSidebars?: () => void;
   toggleFocusMode?: () => void;
@@ -340,7 +338,6 @@ export function useKeyboardShortcuts({
             pathname,
             toggleFileExplorer,
           }),
-          agentAwaitingInput,
         },
         chordState: chordStateRef.current,
         onChordReset: () => {
@@ -420,7 +417,6 @@ export function useKeyboardShortcuts({
     openProjectPickerAction,
     pathname,
     resetModifiers,
-    agentAwaitingInput,
     selectedAgentId,
     toggleAgentList,
     toggleFileExplorer,

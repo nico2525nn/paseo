@@ -30,7 +30,6 @@ function shortcutContext(
     focusScope: "other",
     commandCenterOpen: false,
     hasSelectedAgent: true,
-    agentAwaitingInput: false,
     ...overrides,
   };
 }
@@ -297,9 +296,9 @@ describe("keyboard-shortcuts", () => {
       stopPropagation: false,
     },
     {
-      name: "routes number keys to prompt selection when an agent is awaiting input",
+      name: "routes number keys to prompt selection outside editable scopes",
       event: { key: "2", code: "Digit2" },
-      context: { agentAwaitingInput: true, focusScope: "other" },
+      context: { focusScope: "other" },
       action: "agent.prompt.select",
       payload: { index: 2 },
     },
@@ -374,14 +373,9 @@ describe("keyboard-shortcuts", () => {
       context: { focusScope: "message-input" },
     },
     {
-      name: "does not route prompt selection when no agent is awaiting input",
-      event: { key: "1", code: "Digit1" },
-      context: { focusScope: "other", agentAwaitingInput: false },
-    },
-    {
       name: "does not route prompt selection while typing in the message input",
       event: { key: "1", code: "Digit1" },
-      context: { focusScope: "message-input", agentAwaitingInput: true },
+      context: { focusScope: "message-input" },
     },
   ];
 
