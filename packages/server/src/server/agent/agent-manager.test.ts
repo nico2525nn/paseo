@@ -197,6 +197,119 @@ class TestAgentSession implements AgentSession {
   async close(): Promise<void> {}
 }
 
+class StreamingAssistantSession implements AgentSession {
+  readonly provider = "codex" as const;
+  readonly capabilities = TEST_CAPABILITIES;
+  readonly id = randomUUID();
+  private subscribers = new Set<(event: AgentStreamEvent) => void>();
+  private turnIdCounter = 0;
+
+  constructor(private readonly config: AgentSessionConfig) {}
+
+  async run(): Promise<AgentRunResult> {
+    return {
+      sessionId: this.id,
+      finalText: "",
+      timeline: [],
+    };
+  }
+
+  async startTurn(): Promise<{ turnId: string }> {
+    const turnId = `turn-${++this.turnIdCounter}`;
+    setTimeout(() => {
+      this.pushEvent({ type: "turn_started", provider: this.provider, turnId });
+      this.pushEvent({
+        type: "timeline",
+        provider: this.provider,
+        turnId,
+        item: { type: "assistant_message", text: "final " },
+      });
+      this.pushEvent({
+        type: "timeline",
+        provider: this.provider,
+        turnId,
+        item: { type: "assistant_message", text: "reply" },
+      });
+      this.pushEvent({ type: "turn_completed", provider: this.provider, turnId });
+    }, 0);
+    return { turnId };
+  }
+
+  subscribe(callback: (event: AgentStreamEvent) => void): () => void {
+    this.subscribers.add(callback);
+    return () => {
+      this.subscribers.delete(callback);
+    };
+  }
+
+  private pushEvent(event: AgentStreamEvent): void {
+    for (const callback of this.subscribers) {
+      callback(event);
+    }
+  }
+
+  async *streamHistory(): AsyncGenerator<AgentStreamEvent> {}
+
+  async getRuntimeInfo() {
+    return {
+      provider: this.provider,
+      sessionId: this.id,
+      model: this.config.model ?? null,
+      modeId: this.config.modeId ?? null,
+    };
+  }
+
+  async getAvailableModes() {
+    return [];
+  }
+
+  async getCurrentMode() {
+    return null;
+  }
+
+  async setMode(): Promise<void> {}
+
+  getPendingPermissions() {
+    return [];
+  }
+
+  async respondToPermission(): Promise<void> {}
+
+  describePersistence() {
+    return {
+      provider: this.provider,
+      sessionId: this.id,
+    };
+  }
+
+  async interrupt(): Promise<void> {}
+
+  async close(): Promise<void> {}
+}
+
+class StreamingAssistantClient implements AgentClient {
+  readonly provider = "codex" as const;
+  readonly capabilities = TEST_CAPABILITIES;
+
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+    return new StreamingAssistantSession(config);
+  }
+
+  async resumeSession(
+    _handle: AgentPersistenceHandle,
+    config?: Partial<AgentSessionConfig>,
+  ): Promise<AgentSession> {
+    return new StreamingAssistantSession({
+      provider: "codex",
+      cwd: config?.cwd ?? process.cwd(),
+    });
+  }
+}
+
 describe("AgentManager", () => {
   const logger = createTestLogger();
 
@@ -784,7 +897,7 @@ describe("AgentManager", () => {
     }
   });
 
-  test("fetchTimeline returns full timeline with reset when cursor epoch is stale", async () => {
+  test("fetchTimeline returns committed rows after a known seq without reset metadata", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-stale-"));
     const storagePath = join(workdir, "agents");
     const storage = new AgentStorage(storagePath, logger);
@@ -802,49 +915,51 @@ describe("AgentManager", () => {
       cwd: workdir,
     });
 
-    await manager.appendTimelineItem(snapshot.id, {
-      type: "assistant_message",
-      text: "one",
-    });
-    await manager.appendTimelineItem(snapshot.id, {
-      type: "assistant_message",
-      text: "two",
-    });
-    await manager.appendTimelineItem(snapshot.id, {
-      type: "assistant_message",
-      text: "three",
-    });
+    for (let seq = 1; seq <= 120; seq += 1) {
+      await manager.appendTimelineItem(snapshot.id, {
+        type: "assistant_message",
+        text: `committed row ${seq}`,
+      });
+    }
 
     const baseline = manager.fetchTimeline(snapshot.id, {
       direction: "tail",
-      limit: 2,
+      limit: 0,
     });
-    expect(baseline.rows).toHaveLength(2);
+    expect(baseline.rows).toHaveLength(120);
+
+    await manager.emitLiveTimelineItem(snapshot.id, {
+      type: "assistant_message",
+      text: "partial reply",
+    });
+    await manager.appendTimelineItem(snapshot.id, {
+      type: "assistant_message",
+      text: "finalized reply",
+    });
 
     const result = manager.fetchTimeline(snapshot.id, {
       direction: "after",
       cursor: {
-        epoch: "stale-epoch",
-        seq: baseline.rows[baseline.rows.length - 1]!.seq,
+        seq: 120,
       },
-      limit: 1,
+      limit: 0,
     });
 
-    expect(result.reset).toBe(true);
-    expect(result.staleCursor).toBe(true);
-    expect(result.gap).toBe(false);
-    expect(result.rows).toHaveLength(3);
-    expect(result.rows[0]?.seq).toBe(1);
-    expect(result.rows[result.rows.length - 1]?.seq).toBe(3);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]?.seq).toBe(121);
+    expect(result.rows[0]?.item).toEqual({
+      type: "assistant_message",
+      text: "finalized reply",
+    });
   });
 
-  test("emits live timeline updates without recording canonical timeline rows", async () => {
-    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-live-timeline-"));
+  test("streams assistant chunks provisionally and commits one finalized assistant row", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provisional-timeline-"));
     const storagePath = join(workdir, "agents");
     const storage = new AgentStorage(storagePath, logger);
     const manager = new AgentManager({
       clients: {
-        codex: new TestAgentClient(),
+        codex: new StreamingAssistantClient(),
       },
       registry: storage,
       logger,
@@ -858,9 +973,9 @@ describe("AgentManager", () => {
 
     const streamEvents: Array<{
       seq?: number;
-      epoch?: string;
       eventType?: string;
       itemType?: string;
+      text?: string;
     }> = [];
     manager.subscribe(
       (event) => {
@@ -869,37 +984,61 @@ describe("AgentManager", () => {
         }
         streamEvents.push({
           seq: event.seq,
-          epoch: event.epoch,
           eventType: event.event.type,
           itemType: event.event.type === "timeline" ? event.event.item.type : undefined,
+          text:
+            event.event.type === "timeline" && event.event.item.type === "assistant_message"
+              ? event.event.item.text
+              : undefined,
         });
       },
       { agentId: snapshot.id, replayState: false },
     );
 
-    await manager.emitLiveTimelineItem(snapshot.id, {
-      type: "assistant_message",
-      text: "live-only update",
-    });
+    const stream = manager.streamAgent(snapshot.id, "hello");
+    while (true) {
+      const next = await stream.next();
+      if (next.done) {
+        break;
+      }
+    }
 
-    expect(streamEvents).toHaveLength(1);
-    expect(streamEvents[0]).toMatchObject({
+    const assistantTimelineEvents = streamEvents.filter((event) => event.itemType === "assistant_message");
+    expect(assistantTimelineEvents).toHaveLength(3);
+    expect(assistantTimelineEvents[0]).toMatchObject({
       eventType: "timeline",
       itemType: "assistant_message",
+      text: "final ",
     });
-    expect(streamEvents[0]?.seq).toBeUndefined();
-    expect(streamEvents[0]?.epoch).toBeUndefined();
+    expect(assistantTimelineEvents[0]?.seq).toBeUndefined();
+    expect(assistantTimelineEvents[1]).toMatchObject({
+      text: "reply",
+    });
+    expect(assistantTimelineEvents[1]?.seq).toBeUndefined();
+    expect(assistantTimelineEvents[2]).toMatchObject({
+      text: "final reply",
+      seq: 1,
+    });
 
-    expect(manager.getTimeline(snapshot.id)).toEqual([]);
+    expect(manager.getTimeline(snapshot.id)).toEqual([
+      {
+        type: "assistant_message",
+        text: "final reply",
+      },
+    ]);
     const fetched = manager.fetchTimeline(snapshot.id, {
       direction: "tail",
       limit: 0,
     });
-    expect(fetched.rows).toEqual([]);
+    expect(fetched.rows).toHaveLength(1);
+    expect(fetched.rows[0]?.item).toEqual({
+      type: "assistant_message",
+      text: "final reply",
+    });
   });
 
-  test("fetchTimeline returns full timeline with reset when cursor seq falls behind retention window", async () => {
-    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-gap-"));
+  test("fetchTimeline supports older-history pagination with before seq", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-before-"));
     const storagePath = join(workdir, "agents");
     const storage = new AgentStorage(storagePath, logger);
     const manager = new AgentManager({
@@ -908,7 +1047,6 @@ describe("AgentManager", () => {
       },
       registry: storage,
       logger,
-      maxTimelineItems: 2,
       idFactory: () => "00000000-0000-4000-8000-000000000119",
     });
 
@@ -933,32 +1071,27 @@ describe("AgentManager", () => {
       type: "assistant_message",
       text: "fourth",
     });
-
-    const fresh = manager.fetchTimeline(snapshot.id, {
-      direction: "tail",
-      limit: 0,
+    await manager.appendTimelineItem(snapshot.id, {
+      type: "assistant_message",
+      text: "fifth",
     });
-    expect(fresh.window.minSeq).toBe(3);
-    expect(fresh.window.maxSeq).toBe(4);
 
     const result = manager.fetchTimeline(snapshot.id, {
-      direction: "after",
+      direction: "before",
       cursor: {
-        epoch: fresh.epoch,
-        seq: 1,
+        seq: 5,
       },
-      limit: 10,
+      limit: 2,
     });
 
-    expect(result.reset).toBe(true);
-    expect(result.staleCursor).toBe(false);
-    expect(result.gap).toBe(true);
     expect(result.rows).toHaveLength(2);
     expect(result.rows[0]?.seq).toBe(3);
     expect(result.rows[1]?.seq).toBe(4);
+    expect(result.hasOlder).toBe(true);
+    expect(result.hasNewer).toBe(true);
   });
 
-  test("does not trim timeline by default", async () => {
+  test("does not trim committed history", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-unbounded-"));
     const storagePath = join(workdir, "agents");
     const storage = new AgentStorage(storagePath, logger);
@@ -996,6 +1129,178 @@ describe("AgentManager", () => {
     expect(fetched.rows).toHaveLength(3);
     expect(fetched.window.minSeq).toBe(1);
     expect(fetched.window.maxSeq).toBe(3);
+  });
+
+  test("hydrateTimeline canonicalizes tool-interleaved assistant replay into the committed turn shape", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-canonical-assistant-"));
+    const storagePath = join(workdir, "agents");
+    const storage = new AgentStorage(storagePath, logger);
+
+    class ChunkedAssistantHistorySession extends TestAgentSession {
+      constructor(config: AgentSessionConfig) {
+        super(config);
+      }
+
+      async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "chunk one " },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "chunk two" },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "reasoning", text: "internal" },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: {
+            type: "tool_call",
+            callId: "call-history-1",
+            name: "shell",
+            status: "completed",
+            detail: {
+              type: "shell",
+              command: "echo hi",
+              output: "hi\n",
+              exitCode: 0,
+            },
+            error: null,
+          },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "final answer" },
+        };
+      }
+    }
+
+    class ChunkedAssistantHistoryClient implements AgentClient {
+      readonly provider = "codex" as const;
+      readonly capabilities = TEST_CAPABILITIES;
+
+      async isAvailable(): Promise<boolean> {
+        return true;
+      }
+
+      async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new ChunkedAssistantHistorySession(config);
+      }
+
+      async resumeSession(): Promise<AgentSession> {
+        throw new Error("Not used in this test");
+      }
+    }
+
+    const manager = new AgentManager({
+      clients: {
+        codex: new ChunkedAssistantHistoryClient(),
+      },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000121",
+    });
+
+    const snapshot = await manager.createAgent({
+      provider: "codex",
+      cwd: workdir,
+    });
+
+    await manager.hydrateTimelineFromProvider(snapshot.id);
+
+    expect(manager.getTimeline(snapshot.id)).toEqual([
+      {
+        type: "tool_call",
+        callId: "call-history-1",
+        name: "shell",
+        status: "completed",
+        detail: {
+          type: "shell",
+          command: "echo hi",
+          output: "hi\n",
+          exitCode: 0,
+        },
+        error: null,
+      },
+      { type: "assistant_message", text: "chunk one chunk twofinal answer" },
+    ]);
+  });
+
+  test("hydrateTimeline canonicalizes reasoning-interleaved assistant replay into one committed assistant row", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-reasoning-interleave-"));
+    const storagePath = join(workdir, "agents");
+    const storage = new AgentStorage(storagePath, logger);
+
+    class ReasoningInterleavedHistorySession extends TestAgentSession {
+      constructor(config: AgentSessionConfig) {
+        super(config);
+      }
+
+      async *streamHistory(): AsyncGenerator<AgentStreamEvent> {
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "before reasoning " },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "reasoning", text: "internal step" },
+        };
+        yield {
+          type: "timeline",
+          provider: this.provider,
+          item: { type: "assistant_message", text: "after reasoning" },
+        };
+      }
+    }
+
+    class ReasoningInterleavedHistoryClient implements AgentClient {
+      readonly provider = "codex" as const;
+      readonly capabilities = TEST_CAPABILITIES;
+
+      async isAvailable(): Promise<boolean> {
+        return true;
+      }
+
+      async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new ReasoningInterleavedHistorySession(config);
+      }
+
+      async resumeSession(): Promise<AgentSession> {
+        throw new Error("Not used in this test");
+      }
+    }
+
+    const manager = new AgentManager({
+      clients: {
+        codex: new ReasoningInterleavedHistoryClient(),
+      },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000122",
+    });
+
+    const snapshot = await manager.createAgent({
+      provider: "codex",
+      cwd: workdir,
+    });
+
+    await manager.hydrateTimelineFromProvider(snapshot.id);
+
+    expect(manager.getTimeline(snapshot.id)).toEqual([
+      {
+        type: "assistant_message",
+        text: "before reasoning after reasoning",
+      },
+    ]);
   });
 
   test("createAgent fails when generated agent ID is not a UUID", async () => {

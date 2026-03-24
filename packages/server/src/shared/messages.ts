@@ -722,22 +722,23 @@ export const ShutdownServerRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
-export const AgentTimelineCursorSchema = z.object({
-  epoch: z.string(),
-  seq: z.number().int().nonnegative(),
-});
+export const AgentTimelineCursorSchema = z
+  .object({
+    seq: z.number().int().nonnegative(),
+  })
+  .strict();
 
-export const FetchAgentTimelineRequestMessageSchema = z.object({
-  type: z.literal("fetch_agent_timeline_request"),
-  agentId: z.string(),
-  requestId: z.string(),
-  direction: z.enum(["tail", "before", "after"]).optional(),
-  cursor: AgentTimelineCursorSchema.optional(),
-  // 0 means "all matching rows for this query window".
-  limit: z.number().int().nonnegative().optional(),
-  // Default should be projected for app timeline loading.
-  projection: z.enum(["projected", "canonical"]).optional(),
-});
+export const FetchAgentTimelineRequestMessageSchema = z
+  .object({
+    type: z.literal("fetch_agent_timeline_request"),
+    agentId: z.string(),
+    requestId: z.string(),
+    direction: z.enum(["tail", "before", "after"]).optional(),
+    cursor: AgentTimelineCursorSchema.optional(),
+    // 0 means "all matching rows for this query window".
+    limit: z.number().int().nonnegative().optional(),
+  })
+  .strict();
 
 export const SetAgentModeRequestMessageSchema = z.object({
   type: z.literal("set_agent_mode_request"),
@@ -1545,17 +1546,20 @@ export const AgentUpdateMessageSchema = z.object({
   ]),
 });
 
-export const AgentStreamMessageSchema = z.object({
-  type: z.literal("agent_stream"),
-  payload: z.object({
-    agentId: z.string(),
-    event: AgentStreamEventPayloadSchema,
-    timestamp: z.string(),
-    // Present for timeline events. Maps 1:1 to canonical in-memory timeline rows.
-    seq: z.number().int().nonnegative().optional(),
-    epoch: z.string().optional(),
-  }),
-});
+export const AgentStreamMessageSchema = z
+  .object({
+    type: z.literal("agent_stream"),
+    payload: z
+      .object({
+        agentId: z.string(),
+        event: AgentStreamEventPayloadSchema,
+        timestamp: z.string(),
+        // Present only for committed timeline events.
+        seq: z.number().int().nonnegative().optional(),
+      })
+      .strict(),
+  })
+  .strict();
 
 export const AgentStatusMessageSchema = z.object({
   type: z.literal("agent_status"),
@@ -1649,46 +1653,34 @@ export const FetchAgentResponseMessageSchema = z.object({
   }),
 });
 
-const AgentTimelineSeqRangeSchema = z.object({
-  startSeq: z.number().int().nonnegative(),
-  endSeq: z.number().int().nonnegative(),
-});
+export const AgentTimelineEntryPayloadSchema = z
+  .object({
+    provider: AgentProviderSchema,
+    item: AgentTimelineItemPayloadSchema,
+    timestamp: z.string(),
+    seq: z.number().int().nonnegative(),
+  })
+  .strict();
 
-export const AgentTimelineEntryPayloadSchema = z.object({
-  provider: AgentProviderSchema,
-  item: AgentTimelineItemPayloadSchema,
-  timestamp: z.string(),
-  seqStart: z.number().int().nonnegative(),
-  seqEnd: z.number().int().nonnegative(),
-  sourceSeqRanges: z.array(AgentTimelineSeqRangeSchema),
-  collapsed: z.array(z.enum(["assistant_merge", "tool_lifecycle"])),
-});
-
-export const FetchAgentTimelineResponseMessageSchema = z.object({
-  type: z.literal("fetch_agent_timeline_response"),
-  payload: z.object({
-    requestId: z.string(),
-    agentId: z.string(),
-    agent: AgentSnapshotPayloadSchema.nullable(),
-    direction: z.enum(["tail", "before", "after"]),
-    projection: z.enum(["projected", "canonical"]),
-    epoch: z.string(),
-    reset: z.boolean(),
-    staleCursor: z.boolean(),
-    gap: z.boolean(),
-    window: z.object({
-      minSeq: z.number().int().nonnegative(),
-      maxSeq: z.number().int().nonnegative(),
-      nextSeq: z.number().int().nonnegative(),
-    }),
-    startCursor: AgentTimelineCursorSchema.nullable(),
-    endCursor: AgentTimelineCursorSchema.nullable(),
-    hasOlder: z.boolean(),
-    hasNewer: z.boolean(),
-    entries: z.array(AgentTimelineEntryPayloadSchema),
-    error: z.string().nullable(),
-  }),
-});
+export const FetchAgentTimelineResponseMessageSchema = z
+  .object({
+    type: z.literal("fetch_agent_timeline_response"),
+    payload: z
+      .object({
+        requestId: z.string(),
+        agentId: z.string(),
+        agent: AgentSnapshotPayloadSchema.nullable(),
+        direction: z.enum(["tail", "before", "after"]),
+        startSeq: z.number().int().nonnegative().nullable(),
+        endSeq: z.number().int().nonnegative().nullable(),
+        hasOlder: z.boolean(),
+        hasNewer: z.boolean(),
+        entries: z.array(AgentTimelineEntryPayloadSchema),
+        error: z.string().nullable(),
+      })
+      .strict(),
+  })
+  .strict();
 
 export const SendAgentMessageResponseMessageSchema = z.object({
   type: z.literal("send_agent_message_response"),

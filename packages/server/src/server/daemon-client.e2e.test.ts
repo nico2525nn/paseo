@@ -529,7 +529,6 @@ describe("daemon client E2E", () => {
     const timelineResult = await ctx.client.fetchAgentTimeline(agent.id, {
       direction: "tail",
       limit: 1,
-      projection: "projected",
     });
     expect(timelineResult.agentId).toBe(agent.id);
 
@@ -756,7 +755,6 @@ describe("daemon client E2E", () => {
     const timeline = await ctx.client.fetchAgentTimeline(agent.id, {
       direction: "tail",
       limit: 0,
-      projection: "projected",
     });
     expect(timeline.entries.length).toBeGreaterThan(0);
 

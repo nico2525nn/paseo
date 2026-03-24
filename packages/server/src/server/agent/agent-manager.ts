@@ -42,7 +42,6 @@ export type AgentManagerEvent =
       agentId: string;
       event: AgentStreamEvent;
       seq?: number;
-      epoch?: string;
     };
 
 export type AgentSubscriber = (event: AgentManagerEvent) => void;
@@ -70,7 +69,6 @@ export type ProviderAvailability = {
 
 export type AgentManagerOptions = {
   clients?: Partial<Record<AgentProvider, AgentClient>>;
-  maxTimelineItems?: number;
   idFactory?: () => string;
   registry?: AgentStorage;
   onAgentAttention?: AgentAttentionCallback;
@@ -99,7 +97,6 @@ export type AgentTimelineRow = {
 };
 
 export type AgentTimelineCursor = {
-  epoch: string;
   seq: number;
 };
 
@@ -123,11 +120,7 @@ export type AgentTimelineWindow = {
 };
 
 export type AgentTimelineFetchResult = {
-  epoch: string;
   direction: AgentTimelineFetchDirection;
-  reset: boolean;
-  staleCursor: boolean;
-  gap: boolean;
   window: AgentTimelineWindow;
   hasOlder: boolean;
   hasNewer: boolean;
@@ -173,8 +166,8 @@ type ManagedAgentBase = {
   pendingReplacement: boolean;
   timeline: AgentTimelineItem[];
   timelineRows: AgentTimelineRow[];
-  timelineEpoch: string;
   timelineNextSeq: number;
+  provisionalAssistantText: string | null;
   persistence: AgentPersistenceHandle | null;
   historyPrimed: boolean;
   lastUserMessageAt: Date | null;
@@ -308,7 +301,6 @@ export class AgentManager {
   private readonly agents = new Map<string, ActiveManagedAgent>();
   private readonly pendingForegroundRuns = new Map<string, PendingForegroundRun>();
   private readonly subscribers = new Set<SubscriptionRecord>();
-  private readonly maxTimelineItems: number | null;
   private readonly idFactory: () => string;
   private readonly registry?: AgentStorage;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
@@ -317,13 +309,6 @@ export class AgentManager {
   private logger: Logger;
 
   constructor(options: AgentManagerOptions) {
-    const maxTimelineItems = options?.maxTimelineItems;
-    this.maxTimelineItems =
-      typeof maxTimelineItems === "number" &&
-      Number.isFinite(maxTimelineItems) &&
-      maxTimelineItems >= 0
-        ? Math.floor(maxTimelineItems)
-        : null;
     this.idFactory = options?.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
     this.onAgentAttention = options?.onAgentAttention;
@@ -525,7 +510,7 @@ export class AgentManager {
 
   fetchTimeline(id: string, options?: AgentTimelineFetchOptions): AgentTimelineFetchResult {
     const agent = this.requireAgent(id);
-    const { rows, epoch, nextSeq, minSeq, maxSeq } = this.ensureTimelineState(agent);
+    const { rows, nextSeq, minSeq, maxSeq } = this.ensureTimelineState(agent);
     const direction = options?.direction ?? "tail";
     const requestedLimit = options?.limit;
     const limit =
@@ -536,44 +521,12 @@ export class AgentManager {
 
     const window: AgentTimelineWindow = { minSeq, maxSeq, nextSeq };
 
-    if (cursor && cursor.epoch !== epoch) {
-      return {
-        epoch,
-        direction,
-        reset: true,
-        staleCursor: true,
-        gap: false,
-        window,
-        hasOlder: false,
-        hasNewer: false,
-        rows: rows.map((row) => ({ ...row })),
-      };
-    }
-
     const selectAll = limit === 0;
     const cloneRows = (items: AgentTimelineRow[]) => items.map((row) => ({ ...row }));
 
-    if (direction === "after" && cursor && rows.length > 0 && cursor.seq < minSeq - 1) {
-      return {
-        epoch,
-        direction,
-        reset: true,
-        staleCursor: false,
-        gap: true,
-        window,
-        hasOlder: false,
-        hasNewer: false,
-        rows: cloneRows(rows),
-      };
-    }
-
     if (rows.length === 0) {
       return {
-        epoch,
         direction,
-        reset: false,
-        staleCursor: false,
-        gap: false,
         window,
         hasOlder: false,
         hasNewer: false,
@@ -585,11 +538,7 @@ export class AgentManager {
       const selected = selectAll || limit >= rows.length ? rows : rows.slice(rows.length - limit);
       const hasOlder = selected.length > 0 && selected[0]!.seq > minSeq;
       return {
-        epoch,
         direction,
-        reset: false,
-        staleCursor: false,
-        gap: false,
         window,
         hasOlder,
         hasNewer: false,
@@ -602,11 +551,7 @@ export class AgentManager {
       const startIdx = rows.findIndex((row) => row.seq > baseSeq);
       if (startIdx < 0) {
         return {
-          epoch,
           direction,
-          reset: false,
-          staleCursor: false,
-          gap: false,
           window,
           hasOlder: baseSeq >= minSeq,
           hasNewer: false,
@@ -617,11 +562,7 @@ export class AgentManager {
       const selected = selectAll ? rows.slice(startIdx) : rows.slice(startIdx, startIdx + limit);
       const lastSelected = selected[selected.length - 1];
       return {
-        epoch,
         direction,
-        reset: false,
-        staleCursor: false,
-        gap: false,
         window,
         hasOlder: selected[0]!.seq > minSeq,
         hasNewer: Boolean(lastSelected && lastSelected.seq < maxSeq),
@@ -640,11 +581,7 @@ export class AgentManager {
     const hasOlder = selected.length > 0 && selected[0]!.seq > minSeq;
     const hasNewer = endExclusive >= 0;
     return {
-      epoch,
       direction,
-      reset: false,
-      staleCursor: false,
-      gap: false,
       window,
       hasOlder,
       hasNewer,
@@ -722,8 +659,8 @@ export class AgentManager {
     const timelineState = this.ensureTimelineState(existing);
     const preservedTimeline = [...existing.timeline];
     const preservedTimelineRows = timelineState.rows.map((row) => ({ ...row }));
-    const preservedTimelineEpoch = timelineState.epoch;
     const preservedTimelineNextSeq = timelineState.nextSeq;
+    const preservedProvisionalAssistantText = existing.provisionalAssistantText;
     const preservedHistoryPrimed = existing.historyPrimed;
     const preservedLastUsage = existing.lastUsage;
     const preservedLastError = existing.lastError;
@@ -768,8 +705,8 @@ export class AgentManager {
       lastUserMessageAt: existing.lastUserMessageAt,
       timeline: preservedTimeline,
       timelineRows: preservedTimelineRows,
-      timelineEpoch: preservedTimelineEpoch,
       timelineNextSeq: preservedTimelineNextSeq,
+      provisionalAssistantText: preservedProvisionalAssistantText,
       historyPrimed: preservedHistoryPrimed,
       lastUsage: preservedLastUsage,
       lastError: preservedLastError,
@@ -964,7 +901,6 @@ export class AgentManager {
       },
       {
         seq: row.seq,
-        epoch: this.ensureTimelineState(agent).epoch,
       },
     );
     if (options?.emitState !== false) {
@@ -985,7 +921,6 @@ export class AgentManager {
       },
       {
         seq: row.seq,
-        epoch: this.ensureTimelineState(agent).epoch,
       },
     );
     await this.persistSnapshot(agent);
@@ -1640,8 +1575,8 @@ export class AgentManager {
       labels?: Record<string, string>;
       timeline?: AgentTimelineItem[];
       timelineRows?: AgentTimelineRow[];
-      timelineEpoch?: string;
       timelineNextSeq?: number;
+      provisionalAssistantText?: string | null;
       historyPrimed?: boolean;
       lastUsage?: AgentUsage;
       lastError?: string;
@@ -1689,8 +1624,8 @@ export class AgentManager {
       unsubscribeSession: null,
       timeline: initialTimeline,
       timelineRows: initialTimelineRows,
-      timelineEpoch: options?.timelineEpoch ?? randomUUID(),
       timelineNextSeq: derivedNextSeq,
+      provisionalAssistantText: options?.provisionalAssistantText ?? null,
       persistence: attachPersistenceCwd(session.describePersistence(), config.cwd),
       historyPrimed: options?.historyPrimed ?? false,
       lastUserMessageAt: options?.lastUserMessageAt ?? null,
@@ -1841,7 +1776,6 @@ export class AgentManager {
 
   private ensureTimelineState(agent: ManagedAgent): {
     rows: AgentTimelineRow[];
-    epoch: string;
     nextSeq: number;
     minSeq: number;
     maxSeq: number;
@@ -1853,7 +1787,6 @@ export class AgentManager {
 
     return {
       rows: agent.timelineRows,
-      epoch: agent.timelineEpoch,
       nextSeq: agent.timelineNextSeq,
       minSeq,
       maxSeq,
@@ -1939,14 +1872,63 @@ export class AgentManager {
         return [[messageId, row.item.text]];
       }),
     );
+    const pendingTurnItems: AgentTimelineItem[] = [];
+    let bufferedAssistantText = "";
+    const flushPendingTurn = () => {
+      for (const item of pendingTurnItems) {
+        this.recordTimeline(agent, item);
+      }
+      pendingTurnItems.length = 0;
+      if (bufferedAssistantText) {
+        this.recordTimeline(agent, {
+          type: "assistant_message",
+          text: bufferedAssistantText,
+        });
+        bufferedAssistantText = "";
+      }
+    };
     try {
       for await (const event of agent.session.streamHistory()) {
-        this.handleStreamEvent(agent, event, {
-          fromHistory: true,
-          canonicalUserMessagesById:
-            canonicalUserMessagesById.size > 0 ? canonicalUserMessagesById : undefined,
-        });
+        if (event.type !== "timeline") {
+          if (
+            event.type === "turn_completed" ||
+            event.type === "turn_failed" ||
+            event.type === "turn_canceled"
+          ) {
+            flushPendingTurn();
+          }
+          continue;
+        }
+
+        if (event.item.type === "user_message") {
+          flushPendingTurn();
+          const eventMessageId = normalizeMessageId(event.item.messageId);
+          if (eventMessageId) {
+            const canonicalText = canonicalUserMessagesById.get(eventMessageId);
+            if (canonicalText === event.item.text) {
+              continue;
+            }
+          }
+          this.recordTimeline(agent, event.item);
+          continue;
+        }
+
+        if (event.item.type === "assistant_message") {
+          bufferedAssistantText += event.item.text;
+          continue;
+        }
+
+        if (event.item.type === "reasoning") {
+          continue;
+        }
+
+        if (event.item.type === "tool_call" && event.item.status === "running") {
+          continue;
+        }
+
+        pendingTurnItems.push(event.item);
       }
+      flushPendingTurn();
     } catch {
       // ignore history failures
     }
@@ -2019,6 +2001,16 @@ export class AgentManager {
             }
           }
         }
+        if (event.item.type === "assistant_message") {
+          agent.provisionalAssistantText = `${agent.provisionalAssistantText ?? ""}${event.item.text}`;
+          break;
+        }
+        if (event.item.type === "reasoning") {
+          break;
+        }
+        if (event.item.type === "tool_call" && event.item.status === "running") {
+          break;
+        }
         timelineRow = this.recordTimeline(agent, event.item);
         if (!options?.fromHistory && event.item.type === "user_message") {
           agent.lastUserMessageAt = new Date();
@@ -2035,6 +2027,27 @@ export class AgentManager {
           },
           "handleStreamEvent: turn_completed",
         );
+        if (agent.provisionalAssistantText) {
+          const item: AgentTimelineItem = {
+            type: "assistant_message",
+            text: agent.provisionalAssistantText,
+          };
+          timelineRow = this.recordTimeline(agent, item);
+          if (!options?.fromHistory) {
+            this.dispatchStream(
+              agent.id,
+              {
+                type: "timeline",
+                item,
+                provider: event.provider,
+              },
+              {
+                seq: timelineRow.seq,
+              },
+            );
+          }
+          agent.provisionalAssistantText = null;
+        }
         agent.lastUsage = event.usage;
         agent.lastError = undefined;
         // For autonomous turns (not foreground), transition to idle
@@ -2058,6 +2071,7 @@ export class AgentManager {
           },
           "handleStreamEvent: turn_failed",
         );
+        agent.provisionalAssistantText = null;
         // For autonomous turns, set error state directly
         if (!isForegroundEvent) {
           agent.lifecycle = "error";
@@ -2094,6 +2108,7 @@ export class AgentManager {
           },
           "handleStreamEvent: turn_canceled",
         );
+        agent.provisionalAssistantText = null;
         // For autonomous turns, transition to idle
         // unless a replacement is pending (avoid idle flash during replace)
         if (!isForegroundEvent && !agent.pendingReplacement) {
@@ -2125,6 +2140,7 @@ export class AgentManager {
           },
           "handleStreamEvent: turn_started",
         );
+        agent.provisionalAssistantText = null;
         // For autonomous turn_started (no foreground match), set running
         if (!isForegroundEvent) {
           (agent as ActiveManagedAgent).lifecycle = "running";
@@ -2161,7 +2177,6 @@ export class AgentManager {
         timelineRow
           ? {
               seq: timelineRow.seq,
-              epoch: this.ensureTimelineState(agent).epoch,
             }
           : undefined,
       );
@@ -2203,7 +2218,6 @@ export class AgentManager {
       },
       {
         seq: row.seq,
-        epoch: this.ensureTimelineState(agent).epoch,
       },
     );
   }
@@ -2234,14 +2248,6 @@ export class AgentManager {
     agent.timelineNextSeq = timelineState.nextSeq + 1;
     agent.timeline.push(item);
     timelineState.rows.push(row);
-    if (
-      typeof this.maxTimelineItems === "number" &&
-      agent.timeline.length > this.maxTimelineItems
-    ) {
-      const removeCount = agent.timeline.length - this.maxTimelineItems;
-      agent.timeline.splice(0, removeCount);
-      timelineState.rows.splice(0, removeCount);
-    }
     return row;
   }
 
@@ -2337,7 +2343,7 @@ export class AgentManager {
   private dispatchStream(
     agentId: string,
     event: AgentStreamEvent,
-    metadata?: { seq?: number; epoch?: string },
+    metadata?: { seq?: number },
   ): void {
     this.dispatch({ type: "agent_stream", agentId, event, ...metadata });
   }

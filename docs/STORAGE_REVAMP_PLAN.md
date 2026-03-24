@@ -92,9 +92,9 @@ The room has converged on a simplified contract:
 - `timeline` event with no `seq` means provisional live-only state and is never returned by catch-up fetches
 - committed rows must already be in canonical display/history shape, not raw provider chunk shape
 - `fetch-after-seq` returns committed rows only
-- subscribe may emit the current provisional head once if a turn is active
-- that provisional seed must contain current full provisional items, not replayed deltas
-- that provisional seed must arrive before later provisional patches for that subscription
+- Phase 0 policy: reconnect does not use a subscribe-time provisional seed
+- if a turn is still active after reconnect, the client resumes from future live provisional updates only
+- provisional-seed ordering is therefore out of scope for Phase 0 until product explicitly chooses to add that policy
 - at most one active provisional assistant stream and one active provisional reasoning stream exist per turn
 - tool progress continues to correlate by existing `callId`
 - reasoning is live-only for v1 unless product explicitly changes that call later
@@ -170,6 +170,8 @@ It is not:
 
 If emitted, it must arrive before later provisional patch events for that subscription.
 
+Phase 0 chooses the simpler policy: no subscribe-time provisional seed for now.
+
 ### Reconnect scenarios
 
 Concrete reconnect example:
@@ -193,7 +195,7 @@ Case B: the assistant message has not finished by the time the client reconnects
 2. The client calls `fetch-after-seq(agentId, 120)`.
 3. The server may legitimately return nothing new yet, because committed row `121` does not exist yet.
 4. Live streaming resumes.
-5. A subscribe-time provisional seed may repopulate the current in-progress state if that policy is enabled; otherwise the client continues from fresh live updates only.
+5. In Phase 0, the client continues from fresh live updates only.
 6. When the assistant message finally completes, it becomes one committed row `121`.
 
 In both cases:
@@ -498,9 +500,9 @@ Dependencies:
 Tests required:
 
 - shared message parsing tests for the simplified timeline payloads
-- app reducer tests for committed append, provisional merge, and subscribe-time provisional seeding
-- session/WebSocket tests for `live -> disconnect -> fetch-after-seq -> subscribe -> provisional seed -> resume`
-- explicit subscribe-time provisional-seed ordering test
+- app reducer tests for committed append, provisional merge, and reconnect without provisional seeding
+- session/WebSocket tests for `live -> disconnect -> fetch-after-seq -> subscribe -> resume`
+- explicit no-provisional-seed reconnect test proving that reconnect resumes from committed catch-up plus future live events only
 
 Exit gate:
 The client and server can exchange committed and provisional timeline updates without `epoch`, `reset`, or projection metadata, and all timeline catch-up tests pass with the new contract.

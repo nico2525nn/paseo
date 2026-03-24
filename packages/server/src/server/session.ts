@@ -79,11 +79,6 @@ import {
   emitLiveTimelineItemIfAgentKnown,
 } from "./agent/timeline-append.js";
 import {
-  projectTimelineRows,
-  selectTimelineWindowByProjectedLimit,
-  type TimelineProjectionMode,
-} from "./agent/timeline-projection.js";
-import {
   DEFAULT_STRUCTURED_GENERATION_PROVIDERS,
   StructuredAgentFallbackError,
   StructuredAgentResponseError,
@@ -992,7 +987,6 @@ export class Session {
           event: serializedEvent,
           timestamp: new Date().toISOString(),
           ...(typeof event.seq === "number" ? { seq: event.seq } : {}),
-          ...(typeof event.epoch === "string" ? { epoch: event.epoch } : {}),
         } as const;
 
         this.emit({
@@ -6409,17 +6403,10 @@ export class Session {
     msg: Extract<SessionInboundMessage, { type: "fetch_agent_timeline_request" }>,
   ): Promise<void> {
     const direction: AgentTimelineFetchDirection = msg.direction ?? (msg.cursor ? "after" : "tail");
-    const projection: TimelineProjectionMode = msg.projection ?? "projected";
     const requestedLimit = msg.limit;
     const limit = requestedLimit ?? (direction === "after" ? 0 : undefined);
-    const shouldLimitByProjectedWindow =
-      projection === "canonical" &&
-      direction === "tail" &&
-      typeof requestedLimit === "number" &&
-      requestedLimit > 0;
     const cursor: AgentTimelineCursor | undefined = msg.cursor
       ? {
-          epoch: msg.cursor.epoch,
           seq: msg.cursor.seq,
         }
       : undefined;
@@ -6427,87 +6414,19 @@ export class Session {
     try {
       const snapshot = await this.ensureAgentLoaded(msg.agentId);
       const agentPayload = await this.buildAgentPayload(snapshot);
-
-      let timeline = this.agentManager.fetchTimeline(msg.agentId, {
+      const timeline = this.agentManager.fetchTimeline(msg.agentId, {
         direction,
         cursor,
-        limit:
-          shouldLimitByProjectedWindow && typeof requestedLimit === "number"
-            ? Math.max(1, Math.floor(requestedLimit))
-            : limit,
+        limit,
       });
-
-      let hasOlder = timeline.hasOlder;
-      let hasNewer = timeline.hasNewer;
-      let startCursor: { epoch: string; seq: number } | null = null;
-      let endCursor: { epoch: string; seq: number } | null = null;
-      let entries: ReturnType<typeof projectTimelineRows>;
-
-      if (shouldLimitByProjectedWindow) {
-        const projectedLimit = Math.max(1, Math.floor(requestedLimit));
-        let fetchLimit = projectedLimit;
-        let projectedWindow = selectTimelineWindowByProjectedLimit({
-          rows: timeline.rows,
-          provider: snapshot.provider,
-          direction,
-          limit: projectedLimit,
-          collapseToolLifecycle: false,
-        });
-
-        while (timeline.hasOlder) {
-          const needsMoreProjectedEntries =
-            projectedWindow.projectedEntries.length < projectedLimit;
-          const firstLoadedRow = timeline.rows[0];
-          const firstSelectedRow = projectedWindow.selectedRows[0];
-          const startsAtLoadedBoundary =
-            firstLoadedRow != null &&
-            firstSelectedRow != null &&
-            firstSelectedRow.seq === firstLoadedRow.seq;
-          const boundaryIsAssistantChunk =
-            startsAtLoadedBoundary && firstLoadedRow.item.type === "assistant_message";
-
-          if (!needsMoreProjectedEntries && !boundaryIsAssistantChunk) {
-            break;
-          }
-
-          const maxRows = Math.max(0, timeline.window.maxSeq - timeline.window.minSeq + 1);
-          const nextFetchLimit = Math.min(maxRows, fetchLimit * 2);
-          if (nextFetchLimit <= fetchLimit) {
-            break;
-          }
-
-          fetchLimit = nextFetchLimit;
-          timeline = this.agentManager.fetchTimeline(msg.agentId, {
-            direction,
-            cursor,
-            limit: fetchLimit,
-          });
-          projectedWindow = selectTimelineWindowByProjectedLimit({
-            rows: timeline.rows,
-            provider: snapshot.provider,
-            direction,
-            limit: projectedLimit,
-            collapseToolLifecycle: false,
-          });
-        }
-
-        const selectedRows = projectedWindow.selectedRows;
-
-        entries = projectTimelineRows(selectedRows, snapshot.provider, projection);
-
-        if (projectedWindow.minSeq !== null && projectedWindow.maxSeq !== null) {
-          startCursor = { epoch: timeline.epoch, seq: projectedWindow.minSeq };
-          endCursor = { epoch: timeline.epoch, seq: projectedWindow.maxSeq };
-          hasOlder = projectedWindow.minSeq > timeline.window.minSeq;
-          hasNewer = false;
-        }
-      } else {
-        const firstRow = timeline.rows[0];
-        const lastRow = timeline.rows[timeline.rows.length - 1];
-        startCursor = firstRow ? { epoch: timeline.epoch, seq: firstRow.seq } : null;
-        endCursor = lastRow ? { epoch: timeline.epoch, seq: lastRow.seq } : null;
-        entries = projectTimelineRows(timeline.rows, snapshot.provider, projection);
-      }
+      const firstRow = timeline.rows[0];
+      const lastRow = timeline.rows[timeline.rows.length - 1];
+      const entries = timeline.rows.map((row) => ({
+        provider: snapshot.provider,
+        item: row.item,
+        timestamp: row.timestamp,
+        seq: row.seq,
+      }));
 
       this.emit({
         type: "fetch_agent_timeline_response",
@@ -6516,16 +6435,10 @@ export class Session {
           agentId: msg.agentId,
           agent: agentPayload,
           direction,
-          projection,
-          epoch: timeline.epoch,
-          reset: timeline.reset,
-          staleCursor: timeline.staleCursor,
-          gap: timeline.gap,
-          window: timeline.window,
-          startCursor,
-          endCursor,
-          hasOlder,
-          hasNewer,
+          startSeq: firstRow?.seq ?? null,
+          endSeq: lastRow?.seq ?? null,
+          hasOlder: timeline.hasOlder,
+          hasNewer: timeline.hasNewer,
           entries,
           error: null,
         },
@@ -6542,14 +6455,8 @@ export class Session {
           agentId: msg.agentId,
           agent: null,
           direction,
-          projection,
-          epoch: "",
-          reset: false,
-          staleCursor: false,
-          gap: false,
-          window: { minSeq: 0, maxSeq: 0, nextSeq: 0 },
-          startCursor: null,
-          endCursor: null,
+          startSeq: null,
+          endSeq: null,
           hasOlder: false,
           hasNewer: false,
           entries: [],
