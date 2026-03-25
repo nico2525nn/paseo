@@ -279,6 +279,7 @@ export class AgentManager {
   private readonly clients = new Map<AgentProvider, AgentClient>();
   private readonly agents = new Map<string, ActiveManagedAgent>();
   private readonly timelineStore = new InMemoryAgentTimelineStore();
+  private readonly sessionEventTails = new Map<string, Promise<void>>();
   private readonly pendingForegroundRuns = new Map<string, PendingForegroundRun>();
   private readonly subscribers = new Set<SubscriptionRecord>();
   private readonly idFactory: () => string;
@@ -526,7 +527,8 @@ export class AgentManager {
   }
 
   // Reconstruct an agent from provider persistence. When a durable timeline
-  // store is configured, committed history is seeded from the durable store.
+  // store is configured, the live timeline buffer only seeds seq metadata from
+  // the durable store instead of loading committed history back into memory.
   // Tests without a durable timeline store can still call
   // hydrateTimelineFromProvider() for backward compatibility.
   async resumeAgentFromPersistence(
@@ -1417,20 +1419,27 @@ export class AgentManager {
     await this.durableTimelineStore.deleteAgent(agentId);
   }
 
-  getLastAssistantMessage(agentId: string): string | null {
+  async getLastAssistantMessage(agentId: string): Promise<string | null> {
     const agent = this.agents.get(agentId);
     if (!agent) {
       return null;
     }
 
-    return this.timelineStore.getLastAssistantMessage(agentId);
+    return await this.getLastAssistantMessageFromStores(agentId);
   }
 
   private getLastAssistantMessageFromTimeline(
     timeline: readonly AgentTimelineItem[],
   ): string | null {
+    return this.getLastAssistantMessageSegmentFromTimeline(timeline)?.text ?? null;
+  }
+
+  private getLastAssistantMessageSegmentFromTimeline(
+    timeline: readonly AgentTimelineItem[],
+  ): { text: string; startsAtBeginning: boolean } | null {
     // Collect the last contiguous assistant messages (Claude streams chunks)
     const chunks: string[] = [];
+    let startsAtBeginning = false;
     for (let i = timeline.length - 1; i >= 0; i--) {
       const item = timeline[i];
       if (item.type !== "assistant_message") {
@@ -1440,13 +1449,65 @@ export class AgentManager {
         continue;
       }
       chunks.push(item.text);
+      startsAtBeginning = i === 0;
     }
 
     if (!chunks.length) {
       return null;
     }
 
-    return chunks.reverse().join("");
+    return {
+      text: chunks.reverse().join(""),
+      startsAtBeginning,
+    };
+  }
+
+  private async getLastAssistantMessageFromStores(agentId: string): Promise<string | null> {
+    const liveTimeline = this.timelineStore.getItems(agentId);
+    const liveSegment = this.getLastAssistantMessageSegmentFromTimeline(liveTimeline);
+    if (!this.durableTimelineStore) {
+      return liveSegment?.text ?? null;
+    }
+
+    if (!liveSegment) {
+      return await this.durableTimelineStore.getLastAssistantMessage(agentId);
+    }
+
+    if (!liveSegment.startsAtBeginning) {
+      return liveSegment.text;
+    }
+
+    const lastDurableItem = await this.durableTimelineStore.getLastItem(agentId);
+    if (lastDurableItem?.type !== "assistant_message") {
+      return liveSegment.text;
+    }
+
+    const durableMessage = await this.durableTimelineStore.getLastAssistantMessage(agentId);
+    return durableMessage ? `${durableMessage}${liveSegment.text}` : liveSegment.text;
+  }
+
+  private async getLastItemFromStores(agentId: string): Promise<AgentTimelineItem | null> {
+    const lastLiveItem = this.timelineStore.getLastItem(agentId);
+    if (lastLiveItem) {
+      return lastLiveItem;
+    }
+    if (!this.durableTimelineStore) {
+      return null;
+    }
+    return await this.durableTimelineStore.getLastItem(agentId);
+  }
+
+  private async hasCommittedUserMessageFromStores(
+    agentId: string,
+    options: { messageId: string; text: string },
+  ): Promise<boolean> {
+    if (this.timelineStore.hasCommittedUserMessage(agentId, options)) {
+      return true;
+    }
+    if (!this.durableTimelineStore) {
+      return false;
+    }
+    return await this.durableTimelineStore.hasCommittedUserMessage(agentId, options);
   }
 
   async waitForAgentEvent(
@@ -1466,7 +1527,7 @@ export class AgentManager {
       return {
         status: snapshot.lifecycle,
         permission: immediatePermission,
-        lastMessage: this.getLastAssistantMessage(agentId),
+        lastMessage: await this.getLastAssistantMessage(agentId),
       };
     }
 
@@ -1477,14 +1538,14 @@ export class AgentManager {
       return {
         status: initialStatus,
         permission: null,
-        lastMessage: this.getLastAssistantMessage(agentId),
+        lastMessage: await this.getLastAssistantMessage(agentId),
       };
     }
     if (waitForActive && !initialBusy && !hasForegroundTurn) {
       return {
         status: initialStatus,
         permission: null,
-        lastMessage: this.getLastAssistantMessage(agentId),
+        lastMessage: await this.getLastAssistantMessage(agentId),
       };
     }
 
@@ -1503,6 +1564,7 @@ export class AgentManager {
       let currentStatus: AgentLifecycleStatus = initialStatus;
       let hasStarted = initialBusy || hasForegroundTurn;
       let terminalStatusOverride: AgentLifecycleStatus | null = null;
+      let finished = false;
 
       // Bug #3 Fix: Declare unsubscribe and abortHandler upfront so cleanup can reference them
       let unsubscribe: (() => void) | null = null;
@@ -1531,12 +1593,20 @@ export class AgentManager {
       };
 
       const finish = (permission: AgentPermissionRequest | null) => {
+        if (finished) {
+          return;
+        }
+        finished = true;
         cleanup();
-        resolve({
-          status: currentStatus,
-          permission,
-          lastMessage: this.getLastAssistantMessage(agentId),
-        });
+        void this.getLastAssistantMessage(agentId)
+          .then((lastMessage) => {
+            resolve({
+              status: currentStatus,
+              permission,
+              lastMessage,
+            });
+          })
+          .catch(reject);
       };
 
       // Bug #3 Fix: Set up abort handler BEFORE subscription
@@ -1711,18 +1781,9 @@ export class AgentManager {
       return { timestamp: now.toISOString() };
     }
 
-    const rows = await this.durableTimelineStore.getCommittedRows(agentId);
-    if (rows.length === 0) {
-      return {
-        nextSeq: 1,
-        timestamp: now.toISOString(),
-      };
-    }
-
     return {
-      rows,
-      nextSeq: rows[rows.length - 1]!.seq + 1,
-      timestamp: rows[rows.length - 1]!.timestamp,
+      nextSeq: (await this.durableTimelineStore.getLatestCommittedSeq(agentId)) + 1,
+      timestamp: now.toISOString(),
     };
   }
 
@@ -1732,16 +1793,42 @@ export class AgentManager {
     }
     const agentId = agent.id;
     const unsubscribe = agent.session.subscribe((event: AgentStreamEvent) => {
-      const current = this.agents.get(agentId);
-      if (!current) {
-        return;
-      }
-      this.dispatchSessionEvent(current, event);
+      this.enqueueSessionEvent(agentId, event);
     });
     agent.unsubscribeSession = unsubscribe;
   }
 
-  private dispatchSessionEvent(agent: ActiveManagedAgent, event: AgentStreamEvent): void {
+  private enqueueSessionEvent(agentId: string, event: AgentStreamEvent): void {
+    const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const current = this.agents.get(agentId);
+        if (!current) {
+          return;
+        }
+        await this.dispatchSessionEvent(current, event);
+      })
+      .catch((err) => {
+        this.logger.error(
+          { err, agentId, eventType: event.type },
+          "Failed to process session event",
+        );
+      });
+
+    this.sessionEventTails.set(agentId, next);
+    this.trackBackgroundTask(next);
+    void next.finally(() => {
+      if (this.sessionEventTails.get(agentId) === next) {
+        this.sessionEventTails.delete(agentId);
+      }
+    });
+  }
+
+  private async dispatchSessionEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+  ): Promise<void> {
     const turnId = (event as { turnId?: string }).turnId;
     const matchingWaiters =
       turnId == null
@@ -1750,7 +1837,7 @@ export class AgentManager {
             (waiter) => waiter.turnId === turnId && !waiter.settled,
           );
 
-    this.handleStreamEvent(agent, event);
+    await this.handleStreamEvent(agent, event);
 
     for (const waiter of matchingWaiters) {
       waiter.callback(event);
@@ -1960,14 +2047,14 @@ export class AgentManager {
     }
   }
 
-  private handleStreamEvent(
+  private async handleStreamEvent(
     agent: ActiveManagedAgent,
     event: AgentStreamEvent,
     options?: {
       fromHistory?: boolean;
       canonicalUserMessagesById?: ReadonlyMap<string, string>;
     },
-  ): void {
+  ): Promise<void> {
     const eventTurnId = (event as { turnId?: string }).turnId;
     const isForegroundEvent = Boolean(
       eventTurnId && agent.activeForegroundTurnId === eventTurnId,
@@ -2017,7 +2104,7 @@ export class AgentManager {
           const eventText = event.item.text;
           if (eventMessageId) {
             if (
-              this.timelineStore.hasCommittedUserMessage(agent.id, {
+              await this.hasCommittedUserMessageFromStores(agent.id, {
                 messageId: eventMessageId,
                 text: eventText,
               })
@@ -2103,7 +2190,7 @@ export class AgentManager {
           agent.lifecycle = "error";
         }
         agent.lastError = event.error;
-        this.appendSystemErrorTimelineMessage(
+        await this.appendSystemErrorTimelineMessage(
           agent,
           event.provider,
           this.formatTurnFailedMessage(event),
@@ -2209,7 +2296,7 @@ export class AgentManager {
     }
   }
 
-  private appendSystemErrorTimelineMessage(
+  private async appendSystemErrorTimelineMessage(
     agent: ActiveManagedAgent,
     provider: AgentProvider,
     message: string,
@@ -2217,7 +2304,7 @@ export class AgentManager {
       fromHistory?: boolean;
       canonicalUserMessagesById?: ReadonlyMap<string, string>;
     },
-  ): void {
+  ): Promise<void> {
     if (options?.fromHistory) {
       return;
     }
@@ -2228,7 +2315,7 @@ export class AgentManager {
     }
 
     const text = `${SYSTEM_ERROR_PREFIX} ${normalized}`;
-    const lastItem = this.timelineStore.getLastItem(agent.id);
+    const lastItem = await this.getLastItemFromStores(agent.id);
     if (lastItem?.type === "assistant_message" && lastItem.text === text) {
       return;
     }

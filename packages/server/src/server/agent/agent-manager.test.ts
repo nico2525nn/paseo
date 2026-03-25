@@ -712,7 +712,7 @@ describe("AgentManager", () => {
     expect(afterReload?.config?.title).toBeUndefined();
   });
 
-  test("resumeAgentFromPersistence seeds live helpers from durable rows and skips provider replay", async () => {
+  test("resumeAgentFromPersistence reads durable helpers without loading committed rows into live memory", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-durable-seed-"));
     const storagePath = join(workdir, "agents");
     const dataDir = join(workdir, "db");
@@ -803,13 +803,8 @@ describe("AgentManager", () => {
       const resumed = await manager.resumeAgentFromPersistence(handle, undefined, snapshot.id);
 
       expect(resumed.id).toBe(snapshot.id);
-      expect(manager.getTimeline(snapshot.id)).toEqual([
-        {
-          type: "assistant_message",
-          text: "durable only",
-        },
-      ]);
-      expect(manager.getLastAssistantMessage(snapshot.id)).toBe("durable only");
+      expect(manager.getTimeline(snapshot.id)).toEqual([]);
+      await expect(manager.getLastAssistantMessage(snapshot.id)).resolves.toBe("durable only");
       await expect(manager.getTimelineRows(snapshot.id)).resolves.toEqual([
         {
           seq: 1,
@@ -824,12 +819,7 @@ describe("AgentManager", () => {
       await manager.hydrateTimelineFromProvider(snapshot.id);
 
       expect(historyReplayCount).toBe(0);
-      expect(manager.getTimeline(snapshot.id)).toEqual([
-        {
-          type: "assistant_message",
-          text: "durable only",
-        },
-      ]);
+      expect(manager.getTimeline(snapshot.id)).toEqual([]);
 
       await manager.closeAgent(snapshot.id);
       await manager.deleteCommittedTimeline(snapshot.id);
@@ -1261,7 +1251,7 @@ describe("AgentManager", () => {
       await durableTimelineStore.bulkInsert(snapshot.id, [durableOnlyRow]);
 
       expect(manager.getTimeline(snapshot.id)).toEqual([]);
-      expect(manager.getLastAssistantMessage(snapshot.id)).toBeNull();
+      await expect(manager.getLastAssistantMessage(snapshot.id)).resolves.toBe("durable only");
       await expect(manager.getTimelineRows(snapshot.id)).resolves.toEqual([durableOnlyRow]);
       await expect(
         manager.fetchTimeline(snapshot.id, {

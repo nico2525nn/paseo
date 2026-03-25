@@ -342,7 +342,9 @@ export class VoiceAssistantWebSocketServer {
     this.pushService = new PushService(pushLogger, this.pushTokenStore);
 
     this.agentManager.setAgentAttentionCallback((params) => {
-      this.broadcastAgentAttention(params);
+      void this.broadcastAgentAttention(params).catch((err) => {
+        this.logger.warn({ err, agentId: params.agentId }, "Failed to broadcast agent attention");
+      });
     });
 
     const { allowedOrigins, allowedHosts } = wsConfig;
@@ -1239,11 +1241,11 @@ export class VoiceAssistantWebSocketServer {
     };
   }
 
-  private broadcastAgentAttention(params: {
+  private async broadcastAgentAttention(params: {
     agentId: string;
     provider: AgentProvider;
     reason: "finished" | "error" | "permission";
-  }): void {
+  }): Promise<void> {
     const clientEntries: Array<{
       ws: WebSocketLike;
       state: ClientAttentionState;
@@ -1258,11 +1260,12 @@ export class VoiceAssistantWebSocketServer {
 
     const allStates = clientEntries.map((e) => e.state);
     const agent = this.agentManager.getAgent(params.agentId);
+    const assistantMessage = await this.agentManager.getLastAssistantMessage(params.agentId);
     const notification = buildAgentAttentionNotificationPayload({
       reason: params.reason,
       serverId: this.serverId,
       agentId: params.agentId,
-      assistantMessage: this.agentManager.getLastAssistantMessage(params.agentId),
+      assistantMessage,
       permissionRequest: agent ? findLatestPermissionRequest(agent.pendingPermissions) : null,
     });
 

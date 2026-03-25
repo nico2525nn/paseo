@@ -16,6 +16,14 @@ type AgentTimelineRowInsert = typeof agentTimelineRows.$inferInsert;
 
 const DEFAULT_TIMELINE_FETCH_LIMIT = 200;
 
+function normalizeTimelineMessageId(messageId: string | undefined): string | undefined {
+  if (typeof messageId !== "string") {
+    return undefined;
+  }
+  const normalized = messageId.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
 function toTimelineRow(row: AgentTimelineRowRecord): AgentTimelineRow {
   return {
     seq: row.seq,
@@ -183,6 +191,76 @@ export class DbAgentTimelineStore implements AgentTimelineStore {
       .where(eq(agentTimelineRows.agentId, agentId))
       .orderBy(asc(agentTimelineRows.seq));
     return rows.map(toTimelineRow);
+  }
+
+  async getLastItem(agentId: string): Promise<AgentTimelineItem | null> {
+    const [row] = await this.db
+      .select({ item: agentTimelineRows.item })
+      .from(agentTimelineRows)
+      .where(eq(agentTimelineRows.agentId, agentId))
+      .orderBy(desc(agentTimelineRows.seq))
+      .limit(1);
+    return row?.item ?? null;
+  }
+
+  async getLastAssistantMessage(agentId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({
+        seq: agentTimelineRows.seq,
+        item: agentTimelineRows.item,
+      })
+      .from(agentTimelineRows)
+      .where(
+        and(
+          eq(agentTimelineRows.agentId, agentId),
+          eq(agentTimelineRows.itemKind, "assistant_message"),
+        ),
+      )
+      .orderBy(desc(agentTimelineRows.seq));
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const chunks: string[] = [];
+    let previousSeq: number | null = null;
+    for (const row of rows) {
+      if (previousSeq !== null && row.seq !== previousSeq - 1) {
+        break;
+      }
+      if (row.item.type !== "assistant_message") {
+        break;
+      }
+      chunks.push(row.item.text);
+      previousSeq = row.seq;
+    }
+
+    return chunks.length > 0 ? chunks.reverse().join("") : null;
+  }
+
+  async hasCommittedUserMessage(
+    agentId: string,
+    options: { messageId: string; text: string },
+  ): Promise<boolean> {
+    const messageId = normalizeTimelineMessageId(options.messageId);
+    if (!messageId) {
+      return false;
+    }
+
+    const [row] = await this.db
+      .select({ seq: agentTimelineRows.seq })
+      .from(agentTimelineRows)
+      .where(
+        and(
+          eq(agentTimelineRows.agentId, agentId),
+          eq(agentTimelineRows.itemKind, "user_message"),
+          sql`${agentTimelineRows.item} ->> 'messageId' = ${messageId}`,
+          sql`${agentTimelineRows.item} ->> 'text' = ${options.text}`,
+        ),
+      )
+      .limit(1);
+
+    return row !== undefined;
   }
 
   async deleteAgent(agentId: string): Promise<void> {

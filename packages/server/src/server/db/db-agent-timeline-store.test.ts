@@ -211,4 +211,56 @@ describe("DbAgentTimelineStore", () => {
       }),
     ]);
   });
+
+  test("getLastItem returns the latest committed item", async () => {
+    await store.bulkInsert("agent-1", [
+      createRow(1, createTimelineItem("user_message", "1")),
+      createRow(2, createTimelineItem("assistant_message", "2")),
+    ]);
+
+    await expect(store.getLastItem("agent-1")).resolves.toEqual(
+      createTimelineItem("assistant_message", "2"),
+    );
+    await expect(store.getLastItem("missing-agent")).resolves.toBeNull();
+  });
+
+  test("getLastAssistantMessage assembles the latest contiguous assistant chunks", async () => {
+    await store.bulkInsert("agent-1", [
+      createRow(1, createTimelineItem("assistant_message", "1")),
+      createRow(2, createTimelineItem("assistant_message", "2")),
+      createRow(3, { type: "reasoning", text: "separator-1" }),
+      createRow(4, createTimelineItem("assistant_message", "4")),
+      createRow(5, createTimelineItem("assistant_message", "5")),
+      createRow(6, { type: "reasoning", text: "separator-2" }),
+    ]);
+
+    await expect(store.getLastAssistantMessage("agent-1")).resolves.toBe("assistant-4assistant-5");
+    await expect(store.getLastAssistantMessage("missing-agent")).resolves.toBeNull();
+  });
+
+  test("hasCommittedUserMessage matches by normalized messageId and text", async () => {
+    await store.bulkInsert("agent-1", [
+      createRow(1, createTimelineItem("user_message", "1")),
+      createRow(2, createTimelineItem("assistant_message", "2")),
+    ]);
+
+    await expect(
+      store.hasCommittedUserMessage("agent-1", {
+        messageId: " message-1 ",
+        text: "user-1",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      store.hasCommittedUserMessage("agent-1", {
+        messageId: "message-1",
+        text: "different",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      store.hasCommittedUserMessage("agent-1", {
+        messageId: "   ",
+        text: "user-1",
+      }),
+    ).resolves.toBe(false);
+  });
 });

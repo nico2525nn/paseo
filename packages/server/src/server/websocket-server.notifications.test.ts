@@ -63,7 +63,7 @@ function createServer(agentManagerOverrides?: Record<string, unknown>) {
   const agentManager = {
     setAgentAttentionCallback: vi.fn(),
     getAgent: vi.fn(() => null),
-    getLastAssistantMessage: vi.fn(() => null),
+    getLastAssistantMessage: vi.fn(async () => null),
     ...agentManagerOverrides,
   };
 
@@ -93,9 +93,9 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     vi.clearAllMocks();
   });
 
-  it("uses assistant preview text for push notifications with markdown removed", () => {
+  it("uses assistant preview text for push notifications with markdown removed", async () => {
     const getLastAssistantMessage = vi.fn(
-      () => "**Done**. Updated `README.md` and [link](https://example.com).",
+      async () => "**Done**. Updated `README.md` and [link](https://example.com).",
     );
     const { server } = createServer({
       getAgent: vi.fn(() => ({
@@ -106,7 +106,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       getLastAssistantMessage,
     });
 
-    (server as any).broadcastAgentAttention({
+    await (server as any).broadcastAgentAttention({
       agentId: "agent-1",
       provider: "claude",
       reason: "finished",
@@ -124,8 +124,8 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
     expect(getLastAssistantMessage).toHaveBeenCalledWith("agent-1");
   });
 
-  it("sends push notifications regardless of UI label presence", () => {
-    const getLastAssistantMessage = vi.fn(() => "Done.");
+  it("sends push notifications regardless of UI label presence", async () => {
+    const getLastAssistantMessage = vi.fn(async () => "Done.");
     const { server } = createServer({
       getAgent: vi.fn(() => ({
         config: { title: null },
@@ -136,7 +136,7 @@ describe("VoiceAssistantWebSocketServer notification payloads", () => {
       getLastAssistantMessage,
     });
 
-    (server as any).broadcastAgentAttention({
+    await (server as any).broadcastAgentAttention({
       agentId: "agent-2",
       provider: "claude",
       reason: "finished",
