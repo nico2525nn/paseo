@@ -31,6 +31,14 @@ const PersistedWorkspaceRecordSchema = z.object({
 export type PersistedProjectRecord = z.infer<typeof PersistedProjectRecordSchema>;
 export type PersistedWorkspaceRecord = z.infer<typeof PersistedWorkspaceRecordSchema>;
 
+export function parsePersistedProjectRecords(input: unknown): PersistedProjectRecord[] {
+  return z.array(PersistedProjectRecordSchema).parse(input);
+}
+
+export function parsePersistedWorkspaceRecords(input: unknown): PersistedWorkspaceRecord[] {
+  return z.array(PersistedWorkspaceRecordSchema).parse(input);
+}
+
 export interface ProjectRegistry {
   initialize(): Promise<void>;
   existsOnDisk(): Promise<boolean>;

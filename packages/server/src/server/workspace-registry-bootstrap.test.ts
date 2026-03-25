@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
@@ -8,6 +8,9 @@ import { createTestLogger } from "../test-utils/test-logger.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
+import { openPaseoDatabase } from "./db/pglite-database.js";
+import { DbProjectRegistry } from "./db/db-project-registry.js";
+import { DbWorkspaceRegistry } from "./db/db-workspace-registry.js";
 
 describe("bootstrapWorkspaceRegistries", () => {
   let tmpDir: string;
@@ -163,5 +166,67 @@ describe("bootstrapWorkspaceRegistries", () => {
     expect(await projectRegistry.list()).toHaveLength(1);
     expect(await workspaceRegistry.list()).toHaveLength(1);
     expect((await workspaceRegistry.list())[0]?.workspaceId).toBe("/tmp/existing");
+  });
+
+  test("materializes into DB-backed registries when the database is empty", async () => {
+    mkdirSync(paseoHome, { recursive: true });
+    const database = await openPaseoDatabase(path.join(paseoHome, "db"));
+    const dbProjectRegistry = new DbProjectRegistry(database.db);
+    const dbWorkspaceRegistry = new DbWorkspaceRegistry(database.db);
+
+    try {
+      await agentStorage.initialize();
+      await agentStorage.upsert({
+        id: "agent-1",
+        provider: "codex",
+        cwd: "/tmp/non-git-project",
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-02T00:00:00.000Z",
+        lastActivityAt: "2026-03-02T00:00:00.000Z",
+        lastUserMessageAt: null,
+        title: null,
+        labels: {},
+        lastStatus: "idle",
+        lastModeId: null,
+        config: null,
+        runtimeInfo: { provider: "codex", sessionId: null },
+        persistence: null,
+        archivedAt: null,
+      });
+
+      await bootstrapWorkspaceRegistries({
+        paseoHome,
+        agentStorage,
+        projectRegistry: dbProjectRegistry,
+        workspaceRegistry: dbWorkspaceRegistry,
+        logger,
+      });
+
+      expect(await dbProjectRegistry.list()).toEqual([
+        {
+          projectId: "/tmp/non-git-project",
+          rootPath: "/tmp/non-git-project",
+          kind: "non_git",
+          displayName: "non-git-project",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ]);
+      expect(await dbWorkspaceRegistry.list()).toEqual([
+        {
+          workspaceId: "/tmp/non-git-project",
+          projectId: "/tmp/non-git-project",
+          cwd: "/tmp/non-git-project",
+          kind: "directory",
+          displayName: "non-git-project",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ]);
+    } finally {
+      await database.close();
+    }
   });
 });

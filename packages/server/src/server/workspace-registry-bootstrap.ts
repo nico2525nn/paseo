@@ -54,14 +54,14 @@ export async function bootstrapWorkspaceRegistries(options: {
   workspaceRegistry: WorkspaceRegistry;
   logger: Logger;
 }): Promise<void> {
-  const [projectsExists, workspacesExists] = await Promise.all([
-    options.projectRegistry.existsOnDisk(),
-    options.workspaceRegistry.existsOnDisk(),
-  ]);
-
   await Promise.all([options.projectRegistry.initialize(), options.workspaceRegistry.initialize()]);
 
-  if (projectsExists && workspacesExists) {
+  const [existingProjects, existingWorkspaces] = await Promise.all([
+    options.projectRegistry.list(),
+    options.workspaceRegistry.list(),
+  ]);
+
+  if (existingProjects.length > 0 || existingWorkspaces.length > 0) {
     return;
   }
 
@@ -92,21 +92,6 @@ export async function bootstrapWorkspaceRegistries(options: {
 
     const createdAt = workspaceCreatedAt ?? new Date().toISOString();
     const updatedAt = workspaceUpdatedAt ?? createdAt;
-    await options.workspaceRegistry.upsert(
-      createPersistedWorkspaceRecord({
-        workspaceId,
-        projectId: placement.projectKey,
-        cwd: workspaceId,
-        kind: deriveWorkspaceKind(placement.checkout),
-        displayName: deriveWorkspaceDisplayName({
-          cwd: workspaceId,
-          checkout: placement.checkout,
-        }),
-        createdAt,
-        updatedAt,
-      }),
-    );
-
     const existingProjectRange = projectRanges.get(placement.projectKey) ?? {
       createdAt: null,
       updatedAt: null,
@@ -126,6 +111,21 @@ export async function bootstrapWorkspaceRegistries(options: {
         displayName: placement.projectName,
         createdAt: existingProjectRange.createdAt ?? createdAt,
         updatedAt: existingProjectRange.updatedAt ?? updatedAt,
+      }),
+    );
+
+    await options.workspaceRegistry.upsert(
+      createPersistedWorkspaceRecord({
+        workspaceId,
+        projectId: placement.projectKey,
+        cwd: workspaceId,
+        kind: deriveWorkspaceKind(placement.checkout),
+        displayName: deriveWorkspaceDisplayName({
+          cwd: workspaceId,
+          checkout: placement.checkout,
+        }),
+        createdAt,
+        updatedAt,
       }),
     );
   }

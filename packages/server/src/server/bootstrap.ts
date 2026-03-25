@@ -88,7 +88,10 @@ import { AgentStorage } from "./agent/agent-storage.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
 import { createAllClients, shutdownProviders } from "./agent/provider-registry.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
-import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
+import { DbProjectRegistry } from "./db/db-project-registry.js";
+import { DbWorkspaceRegistry } from "./db/db-workspace-registry.js";
+import { importLegacyProjectWorkspaceJson } from "./db/legacy-project-workspace-import.js";
+import { openPaseoDatabase, type PaseoDatabaseHandle } from "./db/pglite-database.js";
 import { createTerminalManager, type TerminalManager } from "../terminal/terminal-manager.js";
 import { createConnectionOfferV2, encodeOfferToFragmentUrl } from "./connection-offer.js";
 import { loadOrCreateDaemonKeyPair } from "./daemon-keypair.js";
@@ -196,6 +199,7 @@ export async function createPaseoDaemon(
   const pidLockMode = config.pidLock?.mode ?? "self";
   const pidLockOwnerPid = config.pidLock?.ownerPid;
   const ownsPidLock = pidLockMode === "self";
+  let database: PaseoDatabaseHandle | null = null;
 
   // Acquire PID lock before expensive bootstrap work so duplicate starts fail immediately.
   if (ownsPidLock) {
@@ -356,14 +360,6 @@ export async function createPaseoDaemon(
     const httpServer = createHTTPServer(app);
 
     const agentStorage = new AgentStorage(config.agentStoragePath, logger);
-    const projectRegistry = new FileBackedProjectRegistry(
-      path.join(config.paseoHome, "projects", "projects.json"),
-      logger,
-    );
-    const workspaceRegistry = new FileBackedWorkspaceRegistry(
-      path.join(config.paseoHome, "projects", "workspaces.json"),
-      logger,
-    );
     const agentManager = new AgentManager({
       clients: {
         ...createAllClients(logger, {
@@ -378,6 +374,16 @@ export async function createPaseoDaemon(
     const terminalManager = createTerminalManager();
     await agentStorage.initialize();
     logger.info({ elapsed: elapsed() }, "Agent storage initialized");
+    database = await openPaseoDatabase(path.join(config.paseoHome, "db"));
+    logger.info({ elapsed: elapsed() }, "Paseo database opened");
+    const projectRegistry = new DbProjectRegistry(database.db);
+    const workspaceRegistry = new DbWorkspaceRegistry(database.db);
+    await importLegacyProjectWorkspaceJson({
+      db: database.db,
+      paseoHome: config.paseoHome,
+      logger,
+    });
+    logger.info({ elapsed: elapsed() }, "Legacy project/workspace import checked");
     await bootstrapWorkspaceRegistries({
       paseoHome: config.paseoHome,
       agentStorage,
@@ -717,6 +723,7 @@ export async function createPaseoDaemon(
       if (voiceMcpBridgeManager) {
         await voiceMcpBridgeManager.stop().catch(() => undefined);
       }
+      await database?.close().catch(() => undefined);
       await new Promise<void>((resolve) => {
         httpServer.close(() => resolve());
       });
@@ -742,6 +749,7 @@ export async function createPaseoDaemon(
       getListenTarget: () => boundListenTarget,
     };
   } catch (err) {
+    await database?.close().catch(() => undefined);
     if (ownsPidLock) {
       await releasePidLock(config.paseoHome, {
         ownerPid: pidLockOwnerPid,

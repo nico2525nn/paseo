@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { Writable } from "node:stream";
 import pino from "pino";
@@ -8,6 +9,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createPaseoDaemon, parseListenString, type PaseoDaemonConfig } from "./bootstrap.js";
 import { createTestPaseoDaemon } from "./test-utils/paseo-daemon.js";
 import { createTestAgentClients } from "./test-utils/fake-agent-client.js";
+import { openPaseoDatabase } from "./db/pglite-database.js";
+import { projects, workspaces } from "./db/schema.js";
 
 describe("paseo daemon bootstrap", () => {
   afterEach(() => {
@@ -182,4 +185,216 @@ describe("paseo daemon bootstrap", () => {
       await rm(staticDir, { recursive: true, force: true });
     }
   });
+
+  test("imports legacy project and workspace JSON into the DB on first bootstrap", async () => {
+    const { config, cleanup } = await createBootstrapConfig();
+    writeLegacyProjectWorkspaceJson(config.paseoHome, {
+      projects: [
+        {
+          projectId: "project-1",
+          rootPath: "/tmp/project-1",
+          kind: "git",
+          displayName: "Project One",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ],
+      workspaces: [
+        {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          cwd: "/tmp/project-1",
+          kind: "local_checkout",
+          displayName: "main",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ],
+    });
+
+    const daemon = await createPaseoDaemon(config, pino({ level: "silent" }));
+
+    try {
+      await daemon.start();
+      await daemon.stop();
+      const database = await openPaseoDatabase(path.join(config.paseoHome, "db"));
+      try {
+        expect(await database.db.select().from(projects)).toEqual([
+          {
+            projectId: "project-1",
+            rootPath: "/tmp/project-1",
+            kind: "git",
+            displayName: "Project One",
+            createdAt: "2026-03-01T00:00:00.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            archivedAt: null,
+          },
+        ]);
+        expect(await database.db.select().from(workspaces)).toEqual([
+          {
+            workspaceId: "workspace-1",
+            projectId: "project-1",
+            cwd: "/tmp/project-1",
+            kind: "local_checkout",
+            displayName: "main",
+            createdAt: "2026-03-01T00:00:00.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            archivedAt: null,
+          },
+        ]);
+      } finally {
+        await database.close();
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("does not duplicate imported legacy JSON across daemon restarts", async () => {
+    const { config, cleanup } = await createBootstrapConfig();
+    writeLegacyProjectWorkspaceJson(config.paseoHome, {
+      projects: [
+        {
+          projectId: "project-1",
+          rootPath: "/tmp/project-1",
+          kind: "git",
+          displayName: "Project One",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ],
+      workspaces: [
+        {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          cwd: "/tmp/project-1",
+          kind: "local_checkout",
+          displayName: "main",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          archivedAt: null,
+        },
+      ],
+    });
+
+    try {
+      const firstDaemon = await createPaseoDaemon(config, pino({ level: "silent" }));
+      await firstDaemon.start();
+      await firstDaemon.stop();
+
+      const secondDaemon = await createPaseoDaemon(config, pino({ level: "silent" }));
+      await secondDaemon.start();
+      await secondDaemon.stop();
+
+      const database = await openPaseoDatabase(path.join(config.paseoHome, "db"));
+      try {
+        expect(await database.db.select().from(projects)).toHaveLength(1);
+        expect(await database.db.select().from(workspaces)).toHaveLength(1);
+      } finally {
+        await database.close();
+      }
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test("reconciles workspace records into the DB without recreating legacy JSON registry files", async () => {
+    const { config, cleanup } = await createBootstrapConfig();
+    const agentStorageDir = path.join(config.paseoHome, "agents");
+    mkdirSync(agentStorageDir, { recursive: true });
+    const storageBucket = path.join(agentStorageDir, "tmp-db-only-project");
+    mkdirSync(storageBucket, { recursive: true });
+    writeFileSync(
+      path.join(storageBucket, "agent-1.json"),
+      JSON.stringify(
+        {
+          id: "agent-1",
+          provider: "codex",
+          cwd: "/tmp/db-only-project",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          lastActivityAt: "2026-03-02T00:00:00.000Z",
+          lastUserMessageAt: null,
+          title: null,
+          labels: {},
+          lastStatus: "idle",
+          lastModeId: null,
+          config: null,
+          runtimeInfo: { provider: "codex", sessionId: null },
+          persistence: null,
+          archivedAt: null,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    try {
+      const daemon = await createPaseoDaemon(config, pino({ level: "silent" }));
+      await daemon.start();
+      await daemon.stop();
+
+      const database = await openPaseoDatabase(path.join(config.paseoHome, "db"));
+      try {
+        expect(await database.db.select().from(projects)).toHaveLength(1);
+        expect(await database.db.select().from(workspaces)).toHaveLength(1);
+      } finally {
+        await database.close();
+      }
+
+      expect(existsSync(path.join(config.paseoHome, "projects", "projects.json"))).toBe(false);
+      expect(existsSync(path.join(config.paseoHome, "projects", "workspaces.json"))).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
 });
+
+async function createBootstrapConfig(): Promise<{
+  config: PaseoDaemonConfig;
+  cleanup: () => Promise<void>;
+}> {
+  const paseoHomeRoot = await mkdtemp(path.join(os.tmpdir(), "paseo-bootstrap-db-"));
+  const paseoHome = path.join(paseoHomeRoot, ".paseo");
+  const staticDir = await mkdtemp(path.join(os.tmpdir(), "paseo-static-"));
+  await mkdir(paseoHome, { recursive: true });
+
+  return {
+    config: {
+      listen: "127.0.0.1:0",
+      paseoHome,
+      corsAllowedOrigins: [],
+      allowedHosts: true,
+      mcpEnabled: false,
+      staticDir,
+      mcpDebug: false,
+      agentClients: createTestAgentClients(),
+      agentStoragePath: path.join(paseoHome, "agents"),
+      relayEnabled: false,
+      appBaseUrl: "https://app.paseo.sh",
+      openai: undefined,
+      speech: undefined,
+    },
+    cleanup: async () => {
+      await rm(paseoHomeRoot, { recursive: true, force: true });
+      await rm(staticDir, { recursive: true, force: true });
+    },
+  };
+}
+
+function writeLegacyProjectWorkspaceJson(
+  paseoHome: string,
+  input: {
+    projects: unknown[];
+    workspaces: unknown[];
+  },
+): void {
+  const projectsDir = path.join(paseoHome, "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify(input.projects, null, 2), "utf8");
+  writeFileSync(path.join(projectsDir, "workspaces.json"), JSON.stringify(input.workspaces, null, 2), "utf8");
+}
