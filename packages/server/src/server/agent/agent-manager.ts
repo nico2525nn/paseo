@@ -1972,6 +1972,7 @@ export class AgentManager {
     const isForegroundEvent = Boolean(
       eventTurnId && agent.activeForegroundTurnId === eventTurnId,
     );
+    let suppressLiveDispatch = false;
 
     // Only update timestamp for live events, not history replay
     if (!options?.fromHistory) {
@@ -2027,6 +2028,7 @@ export class AgentManager {
         }
         if (event.item.type === "assistant_message") {
           agent.provisionalAssistantText = `${agent.provisionalAssistantText ?? ""}${event.item.text}`;
+          suppressLiveDispatch = true;
           break;
         }
         if (event.item.type === "reasoning") {
@@ -2194,7 +2196,7 @@ export class AgentManager {
     }
 
     // Skip dispatching individual stream events during history replay.
-    if (!options?.fromHistory) {
+    if (!options?.fromHistory && !suppressLiveDispatch) {
       this.dispatchStream(
         agent.id,
         event,
