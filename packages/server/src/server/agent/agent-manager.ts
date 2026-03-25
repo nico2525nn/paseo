@@ -1397,12 +1397,17 @@ export class AgentManager {
     return iterator.done ? null : iterator.value;
   }
 
+  /**
+   * Test-only compatibility hook for managers constructed without a durable
+   * timeline store. Production loads committed history from the durable store
+   * during session registration instead of replaying provider history here.
+   */
   async hydrateTimelineFromProvider(agentId: string): Promise<void> {
     const agent = this.requireAgent(agentId);
     if (this.durableTimelineStore) {
       return;
     }
-    await this.hydrateTimeline(agent);
+    await this.hydrateTimelineFromLegacyProviderHistory(agent);
   }
 
   async deleteCommittedTimeline(agentId: string): Promise<void> {
@@ -1885,7 +1890,9 @@ export class AgentManager {
     }
   }
 
-  private async hydrateTimeline(agent: ActiveManagedAgent): Promise<void> {
+  private async hydrateTimelineFromLegacyProviderHistory(
+    agent: ActiveManagedAgent,
+  ): Promise<void> {
     if (agent.historyPrimed) {
       return;
     }

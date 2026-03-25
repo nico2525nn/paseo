@@ -6,10 +6,12 @@ import { beforeEach, afterEach, describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../test-utils/test-logger.js";
 import {
-  createPersistedProjectRecord,
-  createPersistedWorkspaceRecord,
   FileBackedProjectRegistry,
   FileBackedWorkspaceRegistry,
+} from "./workspace-registry.test-helpers.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
 } from "./workspace-registry.js";
 
 describe("workspace registries", () => {

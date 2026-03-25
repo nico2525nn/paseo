@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { createTestLogger } from "../test-utils/test-logger.js";
 import { AgentStorage } from "./agent/agent-storage.js";
-import { FileBackedProjectRegistry, FileBackedWorkspaceRegistry } from "./workspace-registry.js";
+import {
+  FileBackedProjectRegistry,
+  FileBackedWorkspaceRegistry,
+} from "./workspace-registry.test-helpers.js";
 import { bootstrapWorkspaceRegistries } from "./workspace-registry-bootstrap.js";
 import { openPaseoDatabase } from "./db/pglite-database.js";
 import { DbProjectRegistry } from "./db/db-project-registry.js";

@@ -108,7 +108,7 @@ import type {
   WorkspaceRegistry,
 } from "./workspace-registry.js";
 import { WorkspaceReconciliationService } from "./workspace-reconciliation-service.js";
-import { ProviderHistoryCompatibilityService } from "./provider-history-compatibility-service.js";
+import { AgentLoadingService } from "./agent-loading-service.js";
 import {
   buildVoiceAgentMcpServerConfig,
   buildVoiceModeSystemPrompt,
@@ -180,6 +180,16 @@ const WORKSPACE_GIT_WATCH_REMOVED_FINGERPRINT = "__removed__";
 const TERMINAL_STREAM_HIGH_WATER_BYTES = 256 * 1024;
 const TERMINAL_STREAM_LOW_WATER_BYTES = 16 * 1024;
 const MAX_TERMINAL_STREAM_SLOTS = 256;
+
+type DeleteFencedAgentSnapshotStore = AgentSnapshotStore & {
+  beginDelete(agentId: string): void;
+};
+
+function beginAgentDeleteIfSupported(agentStorage: AgentSnapshotStore, agentId: string): void {
+  if ("beginDelete" in agentStorage && typeof agentStorage.beginDelete === "function") {
+    (agentStorage as DeleteFencedAgentSnapshotStore).beginDelete(agentId);
+  }
+}
 
 function deriveInitialAgentTitle(prompt: string): string | null {
   const firstContentLine = prompt
@@ -393,7 +403,7 @@ export type SessionOptions = {
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
   workspaceReconciliationService?: WorkspaceReconciliationService;
-  providerHistoryCompatibilityService?: ProviderHistoryCompatibilityService;
+  agentLoadingService?: AgentLoadingService;
   createAgentMcpTransport: AgentMcpTransportFactory;
   stt: Resolvable<SpeechToTextProvider | null>;
   tts: Resolvable<TextToSpeechProvider | null>;
@@ -554,7 +564,7 @@ export class Session {
   private readonly projectRegistry: ProjectRegistry;
   private readonly workspaceRegistry: WorkspaceRegistry;
   private readonly workspaceReconciliationService: WorkspaceReconciliationService;
-  private readonly providerHistoryCompatibilityService: ProviderHistoryCompatibilityService;
+  private readonly agentLoadingService: AgentLoadingService;
   private readonly createAgentMcpTransport: AgentMcpTransportFactory;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly pushTokenStore: PushTokenStore;
@@ -616,7 +626,7 @@ export class Session {
       projectRegistry,
       workspaceRegistry,
       workspaceReconciliationService,
-      providerHistoryCompatibilityService,
+      agentLoadingService,
       createAgentMcpTransport,
       stt,
       tts,
@@ -655,9 +665,9 @@ export class Session {
           this.syncWorkspaceGitWatchTarget(cwd, options),
         removeWorkspaceGitWatchTarget: async (cwd) => this.removeWorkspaceGitWatchTarget(cwd),
       });
-    this.providerHistoryCompatibilityService =
-      providerHistoryCompatibilityService ??
-      new ProviderHistoryCompatibilityService({
+    this.agentLoadingService =
+      agentLoadingService ??
+      new AgentLoadingService({
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -1082,7 +1092,7 @@ export class Session {
   }
 
   private async ensureAgentLoaded(agentId: string): Promise<ManagedAgent> {
-    return this.providerHistoryCompatibilityService.ensureAgentLoaded({ agentId });
+    return this.agentLoadingService.ensureAgentLoaded({ agentId });
   }
 
   private matchesAgentFilter(options: {
@@ -1675,8 +1685,8 @@ export class Session {
       (await this.agentStorage.get(agentId))?.cwd ??
       null;
 
-    // Prevent the persistence hook from re-creating the record while we close/delete.
-    this.agentStorage.beginDelete(agentId);
+    // File-backed storage still needs an early delete fence before closeAgent().
+    beginAgentDeleteIfSupported(this.agentStorage, agentId);
 
     try {
       await this.agentManager.closeAgent(agentId);
@@ -2482,7 +2492,7 @@ export class Session {
     );
     try {
       await this.unarchiveAgentByHandle(handle);
-      const snapshot = await this.providerHistoryCompatibilityService.resumeAgent({
+      const snapshot = await this.agentLoadingService.resumeAgent({
         handle,
         overrides,
       });
@@ -2530,7 +2540,7 @@ export class Session {
       if (this.agentManager.getAgent(agentId)) {
         await this.interruptAgentIfRunning(agentId);
       }
-      const snapshot = await this.providerHistoryCompatibilityService.refreshAgent({ agentId });
+      const snapshot = await this.agentLoadingService.refreshAgent({ agentId });
       await this.forwardAgentUpdate(snapshot);
       const timelineSize = this.agentManager.getTimeline(agentId).length;
       if (requestId) {

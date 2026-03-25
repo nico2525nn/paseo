@@ -379,8 +379,6 @@ export async function createPaseoDaemon(
     });
 
     const terminalManager = createTerminalManager();
-    await agentStorage.initialize();
-    logger.info({ elapsed: elapsed() }, "Agent storage initialized");
     const projectRegistry = new DbProjectRegistry(database.db);
     const workspaceRegistry = new DbWorkspaceRegistry(database.db);
     await importLegacyProjectWorkspaceJson({
@@ -719,7 +717,6 @@ export async function createPaseoDaemon(
     const stop = async () => {
       await closeAllAgents(logger, agentManager);
       await agentManager.flush().catch(() => undefined);
-      await agentStorage.flush().catch(() => undefined);
       await shutdownProviders(logger, {
         runtimeSettings: config.agentProviderSettings,
       });

@@ -95,10 +95,6 @@ export class DbAgentSnapshotStore implements AgentSnapshotStore {
     this.db = db;
   }
 
-  async initialize(): Promise<void> {
-    return Promise.resolve();
-  }
-
   async list(): Promise<StoredAgentRecord[]> {
     const rows = await this.db
       .select()
@@ -132,8 +128,6 @@ export class DbAgentSnapshotStore implements AgentSnapshotStore {
       });
   }
 
-  beginDelete(_agentId: string): void {}
-
   async remove(agentId: string): Promise<void> {
     await this.db.delete(agentSnapshots).where(eq(agentSnapshots.agentId, agentId));
   }
@@ -166,10 +160,6 @@ export class DbAgentSnapshotStore implements AgentSnapshotStore {
       throw new Error(`Agent ${agentId} not found`);
     }
     await this.upsert({ ...record, title });
-  }
-
-  async flush(): Promise<void> {
-    return Promise.resolve();
   }
 
   private async resolveWorkspaceId(cwd: string): Promise<string | null> {

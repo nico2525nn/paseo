@@ -137,7 +137,6 @@ describe("DbAgentSnapshotStore", () => {
     dataDir = path.join(tmpDir, "db");
     database = await openPaseoDatabase(dataDir);
     store = new DbAgentSnapshotStore(database.db);
-    await store.initialize();
   });
 
   afterEach(async () => {
@@ -215,18 +214,6 @@ describe("DbAgentSnapshotStore", () => {
       expect.objectContaining({
         id: "agent-title",
         title: "Renamed agent",
-      }),
-    );
-  });
-
-  test("beginDelete and flush are safe no-ops", async () => {
-    await store.upsert(createStoredAgentRecord({ id: "agent-noop" }));
-
-    expect(() => store.beginDelete("agent-noop")).not.toThrow();
-    await expect(store.flush()).resolves.toBeUndefined();
-    expect(await store.get("agent-noop")).toEqual(
-      expect.objectContaining({
-        id: "agent-noop",
       }),
     );
   });

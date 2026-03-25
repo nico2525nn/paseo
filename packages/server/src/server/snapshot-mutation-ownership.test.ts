@@ -22,13 +22,11 @@ describe("snapshot mutation ownership boundary", () => {
         model: "gpt-5.2-codex",
       });
       await daemonHandle.daemon.agentManager.flush();
-      await daemonHandle.daemon.agentStorage.flush();
 
       const applySnapshotSpy = vi.spyOn(daemonHandle.daemon.agentStorage, "applySnapshot");
 
       await daemonHandle.daemon.agentManager.setAgentModel(snapshot.id, "gpt-5.4");
       await daemonHandle.daemon.agentManager.flush();
-      await daemonHandle.daemon.agentStorage.flush();
 
       expect(applySnapshotSpy).toHaveBeenCalledTimes(1);
 

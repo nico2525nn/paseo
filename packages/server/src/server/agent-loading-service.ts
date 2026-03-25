@@ -13,7 +13,7 @@ import {
 
 const pendingAgentBootstrapLoads = new Map<string, Promise<ManagedAgent>>();
 
-export type ProviderHistoryCompatibilityServiceOptions = {
+export type AgentLoadingServiceOptions = {
   agentManager: Pick<
     AgentManager,
     | "createAgent"
@@ -25,17 +25,16 @@ export type ProviderHistoryCompatibilityServiceOptions = {
   logger: pino.Logger;
 };
 
-// Compatibility-only bridge for runtime paths that still need coordinated cold
-// load, explicit resume, or refresh behavior.
-export class ProviderHistoryCompatibilityService {
-  private readonly agentManager: ProviderHistoryCompatibilityServiceOptions["agentManager"];
-  private readonly agentStorage: ProviderHistoryCompatibilityServiceOptions["agentStorage"];
+// Coordinates cold loads, explicit resumes, and refreshes for persisted agents.
+export class AgentLoadingService {
+  private readonly agentManager: AgentLoadingServiceOptions["agentManager"];
+  private readonly agentStorage: AgentLoadingServiceOptions["agentStorage"];
   private readonly logger: pino.Logger;
 
-  constructor(options: ProviderHistoryCompatibilityServiceOptions) {
+  constructor(options: AgentLoadingServiceOptions) {
     this.agentManager = options.agentManager;
     this.agentStorage = options.agentStorage;
-    this.logger = options.logger.child({ component: "provider-history-compatibility" });
+    this.logger = options.logger.child({ component: "agent-loading" });
   }
 
   async ensureAgentLoaded(options: { agentId: string }): Promise<ManagedAgent> {
@@ -66,10 +65,7 @@ export class ProviderHistoryCompatibilityService {
     handle: AgentPersistenceHandle;
     overrides?: Partial<AgentSessionConfig>;
   }): Promise<ManagedAgent> {
-    return this.agentManager.resumeAgentFromPersistence(
-      options.handle,
-      options.overrides,
-    );
+    return this.agentManager.resumeAgentFromPersistence(options.handle, options.overrides);
   }
 
   async refreshAgent(options: { agentId: string }): Promise<ManagedAgent> {

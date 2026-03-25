@@ -4,11 +4,11 @@ import path from "node:path";
 import pino from "pino";
 import { describe, expect, test, vi } from "vitest";
 
+import { AgentLoadingService } from "./agent-loading-service.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage, type StoredAgentRecord } from "./agent/agent-storage.js";
 import { DbAgentTimelineStore } from "./db/db-agent-timeline-store.js";
 import { openPaseoDatabase } from "./db/pglite-database.js";
-import { ProviderHistoryCompatibilityService } from "./provider-history-compatibility-service.js";
 import { createTestAgentClients } from "./test-utils/fake-agent-client.js";
 
 function createStoredAgentRecord(overrides?: Partial<StoredAgentRecord>): StoredAgentRecord {
@@ -56,7 +56,7 @@ function createCompatibilitySnapshot(overrides?: Partial<Record<string, unknown>
   };
 }
 
-describe("ProviderHistoryCompatibilityService", () => {
+describe("AgentLoadingService", () => {
   test("ensureAgentLoaded seeds the live timeline from durable rows for an unloaded persisted agent", async () => {
     const workspaceRoot = mkdtempSync(path.join(os.tmpdir(), "provider-history-compat-load-"));
     const logger = pino({ level: "silent" });
@@ -71,7 +71,7 @@ describe("ProviderHistoryCompatibilityService", () => {
         logger,
         idFactory: () => "00000000-0000-4000-8000-000000000301",
       });
-      const service = new ProviderHistoryCompatibilityService({
+      const service = new AgentLoadingService({
         agentManager: manager as any,
         agentStorage: storage as any,
         logger,
@@ -118,7 +118,7 @@ describe("ProviderHistoryCompatibilityService", () => {
         logger,
         idFactory: () => "00000000-0000-4000-8000-000000000302",
       });
-      const service = new ProviderHistoryCompatibilityService({
+      const service = new AgentLoadingService({
         agentManager: manager as any,
         agentStorage: storage as any,
         logger,
@@ -169,7 +169,7 @@ describe("ProviderHistoryCompatibilityService", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: agentManager as any,
       agentStorage: agentStorage as any,
       logger: logger as any,
@@ -200,7 +200,7 @@ describe("ProviderHistoryCompatibilityService", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: agentManager as any,
       agentStorage: {
         get: async () => null,
@@ -248,7 +248,7 @@ describe("ProviderHistoryCompatibilityService", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: agentManager as any,
       agentStorage: {
         get: async () => null,
@@ -278,7 +278,7 @@ describe("ProviderHistoryCompatibilityService", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: agentManager as any,
       agentStorage: {
         get: async () => null,
@@ -313,7 +313,7 @@ describe("ProviderHistoryCompatibilityService", () => {
       info: vi.fn(),
       warn: vi.fn(),
     };
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: agentManager as any,
       agentStorage: {
         get: vi.fn(async () => record),
@@ -352,7 +352,7 @@ describe("ProviderHistoryCompatibilityService", () => {
   });
 
   test("refreshAgent preserves the unloaded no-persistence error", async () => {
-    const service = new ProviderHistoryCompatibilityService({
+    const service = new AgentLoadingService({
       agentManager: {
         getAgent: vi.fn(() => null),
         resumeAgentFromPersistence: vi.fn(),

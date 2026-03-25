@@ -39,7 +39,7 @@ function createCompatibilitySnapshot(overrides?: Partial<Record<string, unknown>
 }
 
 function createSessionForOwnershipTests(options?: {
-  providerHistoryCompatibilityService?: {
+  agentLoadingService?: {
     ensureAgentLoaded?: (options: { agentId: string }) => Promise<any>;
     resumeAgent?: (options: {
       handle: { provider: string; sessionId: string };
@@ -66,17 +66,13 @@ function createSessionForOwnershipTests(options?: {
     listAgents: () => [],
     getAgent: vi.fn(() => options?.loadedAgent ?? null),
     createAgent: vi.fn(async () => {
-      throw new Error(
-        "Session should delegate unloaded bootstrap to ProviderHistoryCompatibilityService",
-      );
+      throw new Error("Session should delegate unloaded bootstrap to AgentLoadingService");
     }),
     resumeAgentFromPersistence: vi.fn(async () => {
-      throw new Error(
-        "Session should delegate persistence resume to ProviderHistoryCompatibilityService",
-      );
+      throw new Error("Session should delegate persistence resume to AgentLoadingService");
     }),
     reloadAgentSession: vi.fn(async () => {
-      throw new Error("Session should delegate refresh reload to ProviderHistoryCompatibilityService");
+      throw new Error("Session should delegate refresh reload to AgentLoadingService");
     }),
     hydrateTimelineFromProvider: vi.fn(async () => {
       throw new Error("Session should not call hydrateTimelineFromProvider directly");
@@ -127,7 +123,7 @@ function createSessionForOwnershipTests(options?: {
     stt: null,
     tts: null,
     terminalManager: null,
-    providerHistoryCompatibilityService: options?.providerHistoryCompatibilityService,
+    agentLoadingService: options?.agentLoadingService,
   } as any) as any;
 
   return { session, emitted, agentManager };
@@ -145,7 +141,7 @@ describe("provider history compatibility ownership", () => {
           timestamp: new Date("2026-03-24T00:00:01.000Z"),
         },
       ],
-      providerHistoryCompatibilityService: {
+      agentLoadingService: {
         ensureAgentLoaded,
       },
     });
@@ -178,7 +174,7 @@ describe("provider history compatibility ownership", () => {
     const ensureAgentLoaded = vi.fn(async () => createCompatibilitySnapshot());
     const { session, agentManager, emitted } = createSessionForOwnershipTests({
       storedRecord: createStoredAgentRecord(),
-      providerHistoryCompatibilityService: {
+      agentLoadingService: {
         ensureAgentLoaded,
       },
     });
@@ -220,7 +216,7 @@ describe("provider history compatibility ownership", () => {
   test("resume_agent_request delegates persistence bootstrap through the compatibility seam", async () => {
     const resumeAgent = vi.fn(async () => createCompatibilitySnapshot());
     const { session, emitted } = createSessionForOwnershipTests({
-      providerHistoryCompatibilityService: {
+      agentLoadingService: {
         resumeAgent,
       },
     });
@@ -272,7 +268,7 @@ describe("provider history compatibility ownership", () => {
     );
     const { session, emitted } = createSessionForOwnershipTests({
       loadedAgent: createCompatibilitySnapshot(),
-      providerHistoryCompatibilityService: {
+      agentLoadingService: {
         refreshAgent,
       },
     });
@@ -304,7 +300,7 @@ describe("provider history compatibility ownership", () => {
     const refreshAgent = vi.fn(async () => createCompatibilitySnapshot());
     const { session, emitted } = createSessionForOwnershipTests({
       storedRecord: createStoredAgentRecord(),
-      providerHistoryCompatibilityService: {
+      agentLoadingService: {
         refreshAgent,
       },
     });
