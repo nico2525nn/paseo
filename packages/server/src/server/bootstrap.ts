@@ -364,6 +364,23 @@ export async function createPaseoDaemon(
 
     database = await openPaseoDatabase(path.join(config.paseoHome, "db"));
     logger.info({ elapsed: elapsed() }, "Paseo database opened");
+
+    if (process.env.NODE_ENV === "development") {
+      app.post("/dev/db-query", async (req, res) => {
+        try {
+          const { sql } = req.body;
+          if (typeof sql !== "string") {
+            res.status(400).json({ error: "Missing sql string" });
+            return;
+          }
+          const result = await database!.client.query(sql);
+          res.json({ rows: result.rows });
+        } catch (err: any) {
+          res.status(400).json({ error: err.message });
+        }
+      });
+    }
+
     const agentStorage = new DbAgentSnapshotStore(database.db);
     const durableTimelineStore = new DbAgentTimelineStore(database.db);
     const agentManager = new AgentManager({
