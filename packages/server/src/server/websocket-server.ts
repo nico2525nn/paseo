@@ -42,7 +42,6 @@ import {
 } from "./agent-attention-policy.js";
 import {
   buildAgentAttentionNotificationPayload,
-  findLatestAssistantMessageFromTimeline,
   findLatestPermissionRequest,
 } from "../shared/agent-attention-notification.js";
 
@@ -1263,7 +1262,7 @@ export class VoiceAssistantWebSocketServer {
       reason: params.reason,
       serverId: this.serverId,
       agentId: params.agentId,
-      assistantMessage: agent ? findLatestAssistantMessageFromTimeline(agent.timeline) : null,
+      assistantMessage: this.agentManager.getLastAssistantMessage(params.agentId),
       permissionRequest: agent ? findLatestPermissionRequest(agent.pendingPermissions) : null,
     });
 

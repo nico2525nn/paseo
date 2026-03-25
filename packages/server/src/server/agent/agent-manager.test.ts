@@ -1091,6 +1091,58 @@ describe("AgentManager", () => {
     });
   });
 
+  test("getAgent does not expose committed history internals once manager owns the seam", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-timeline-boundary-"));
+    const storagePath = join(workdir, "agents");
+    const storage = new AgentStorage(storagePath, logger);
+    const manager = new AgentManager({
+      clients: {
+        codex: new TestAgentClient(),
+      },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000138",
+    });
+
+    const snapshot = await manager.createAgent({
+      provider: "codex",
+      cwd: workdir,
+    });
+
+    manager.recordUserMessage(snapshot.id, "hello boundary", {
+      messageId: "msg-boundary-1",
+      emitState: false,
+    });
+    await manager.appendTimelineItem(snapshot.id, {
+      type: "assistant_message",
+      text: "history stays behind manager",
+    });
+
+    const live = manager.getAgent(snapshot.id) as Record<string, unknown>;
+    expect(live).not.toBeNull();
+    expect("timeline" in live).toBe(false);
+    expect("timelineRows" in live).toBe(false);
+    expect("timelineNextSeq" in live).toBe(false);
+
+    expect(manager.getTimeline(snapshot.id)).toEqual([
+      {
+        type: "user_message",
+        text: "hello boundary",
+        messageId: "msg-boundary-1",
+      },
+      {
+        type: "assistant_message",
+        text: "history stays behind manager",
+      },
+    ]);
+
+    const fetched = manager.fetchTimeline(snapshot.id, {
+      direction: "tail",
+      limit: 0,
+    });
+    expect(fetched.rows.map((row) => row.seq)).toEqual([1, 2]);
+  });
+
   test("streams assistant chunks provisionally and commits one finalized assistant row", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-provisional-timeline-"));
     const storagePath = join(workdir, "agents");
