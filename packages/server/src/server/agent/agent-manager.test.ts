@@ -3536,6 +3536,41 @@ describe("AgentManager", () => {
     expect(persisted?.persistence?.sessionId).toBe(snapshot.persistence?.sessionId);
   });
 
+  test("closeAgent does not enqueue another snapshot persist", async () => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-close-no-persist-"));
+    const storagePath = join(workdir, "agents");
+    const storage = new AgentStorage(storagePath, logger);
+    const applySnapshotSpy = vi.spyOn(storage, "applySnapshot");
+    const manager = new AgentManager({
+      clients: {
+        codex: new TestAgentClient(),
+      },
+      registry: storage,
+      logger,
+      idFactory: () => "00000000-0000-4000-8000-000000000112",
+    });
+
+    try {
+      const snapshot = await manager.createAgent({
+        provider: "codex",
+        cwd: workdir,
+      });
+
+      await manager.flush();
+      const persistCountBeforeClose = applySnapshotSpy.mock.calls.length;
+
+      await manager.closeAgent(snapshot.id);
+      await manager.flush();
+
+      expect(applySnapshotSpy).toHaveBeenCalledTimes(persistCountBeforeClose);
+    } finally {
+      applySnapshotSpy.mockRestore();
+      await manager.flush().catch(() => undefined);
+      await storage.flush().catch(() => undefined);
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
   test("hydrateTimeline skips provider user_message items to prevent duplicates with recordUserMessage", async () => {
     const workdir = mkdtempSync(join(tmpdir(), "agent-manager-history-dedup-"));
     const storagePath = join(workdir, "agents");

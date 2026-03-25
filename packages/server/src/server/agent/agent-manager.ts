@@ -662,7 +662,7 @@ export class AgentManager {
     };
     await session.close();
     this.timelineStore.delete(agentId);
-    this.emitState(closedAgent);
+    this.emitState(closedAgent, { persist: false });
     this.logger.trace({ agentId }, "closeAgent: completed");
   }
 
