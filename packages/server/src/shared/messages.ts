@@ -1097,7 +1097,7 @@ export const CreatePaseoWorktreeRequestSchema = z.object({
   requestId: z.string(),
 });
 
-// TODO: Remove once most clients are on >=0.1.50 and support arbitrary editor ids.
+// TODO(2026-07): Remove once most clients are on >=0.1.50 and support arbitrary editor ids.
 export const LEGACY_EDITOR_TARGET_IDS = [
   "cursor",
   "vscode",

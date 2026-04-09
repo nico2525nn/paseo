@@ -6115,7 +6115,7 @@ export class Session {
   }
 
   async getAvailableEditorTargets() {
-    return this.filterEditorsForClient(listAvailableEditorTargets());
+    return this.filterEditorsForClient(await listAvailableEditorTargets());
   }
 
   async openEditorTarget(options: { editorId: EditorTargetId; path: string }): Promise<void> {
@@ -7543,7 +7543,9 @@ export class Session {
         listStoredAgents: () => this.agentStorage.list(),
         listLiveAgents: () => this.agentManager.listAgents(),
         resolveAgentIdentifier: (identifier) => this.resolveAgentIdentifier(identifier),
-        sendAgentMessage: (agentId, text) => this.handleSendAgentMessage(agentId, text),
+        sendAgentMessage: async (agentId, text) => {
+          await this.handleSendAgentMessage(agentId, text);
+        },
       });
     } catch (error) {
       this.emitChatRpcError(request, error);
