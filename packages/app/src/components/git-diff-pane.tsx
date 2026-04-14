@@ -32,7 +32,6 @@ import {
 } from "lucide-react-native";
 import { useCheckoutGitActionsStore } from "@/stores/checkout-git-actions-store";
 import {
-  useCheckoutDiffQuery,
   type ParsedDiffFile,
   type DiffLine,
   type HighlightToken,
@@ -42,7 +41,6 @@ import {
   type DiffFileMetadata,
 } from "@/hooks/use-checkout-diff-metadata-query";
 import { useFileHunks } from "@/hooks/use-file-hunks";
-import { useSessionForServer } from "@/hooks/use-session-directory";
 import { useCheckoutStatusQuery } from "@/hooks/use-checkout-status-query";
 import { useCheckoutPrStatusQuery } from "@/hooks/use-checkout-pr-status-query";
 import { useChangesPreferences } from "@/hooks/use-changes-preferences";
@@ -743,7 +741,6 @@ interface GitDiffPaneProps {
 
 type DiffFlatItem =
   | { type: "header"; file: DiffFileHeaderFields; fileIndex: number; isExpanded: boolean }
-  | { type: "body"; file: ParsedDiffFile; fileIndex: number }
   | { type: "lazy-body"; file: DiffFileMetadata; fileIndex: number };
 
 export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDiffPaneProps) {
@@ -760,13 +757,6 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
     useChangesPreferences();
   const wrapLines = changesPreferences.wrapLines;
   const effectiveLayout = canUseSplitLayout ? changesPreferences.layout : "unified";
-
-  // Feature detection: use V2 lazy diff when daemon supports it
-  const useLazyDiff =
-    useSessionForServer(
-      serverId,
-      (session) => session?.serverInfo?.features?.lazyDiffRpcs === true,
-    ) ?? false;
 
   const handleToggleWrapLines = useCallback(() => {
     void updateChangesPreferences({ wrapLines: !wrapLines });
@@ -804,50 +794,22 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
   const autoDiffMode = hasUncommittedChanges ? "uncommitted" : "base";
   const diffMode = diffModeOverride ?? autoDiffMode;
 
-  // V1: full diff (hunks included) — used when daemon doesn't support lazy diff
   const {
-    files: v1Files,
-    payloadError: v1DiffPayloadError,
-    isLoading: isV1DiffLoading,
-    isFetching: isV1DiffFetching,
-    isError: isV1DiffError,
-    error: v1DiffError,
-    refresh: refreshV1Diff,
-  } = useCheckoutDiffQuery({
-    serverId,
-    cwd,
-    mode: diffMode,
-    baseRef,
-    ignoreWhitespace: changesPreferences.hideWhitespace,
-    enabled: isGit && !useLazyDiff,
-  });
-
-  // V2: metadata-only (hunks fetched on demand per file)
-  const {
-    files: v2Files,
-    payloadError: v2DiffPayloadError,
-    isLoading: isV2DiffLoading,
-    isFetching: isV2DiffFetching,
-    isError: isV2DiffError,
-    error: v2DiffError,
-    refresh: refreshV2Diff,
+    files,
+    payloadError: diffPayloadError,
+    isLoading: isDiffLoading,
+    isFetching: isDiffFetching,
+    isError: isDiffError,
+    error: diffError,
+    refresh: refreshDiff,
   } = useCheckoutDiffMetadataQuery({
     serverId,
     cwd,
     mode: diffMode,
     baseRef,
     ignoreWhitespace: changesPreferences.hideWhitespace,
-    enabled: isGit && useLazyDiff,
+    enabled: isGit,
   });
-
-  // Unified interface for both V1 and V2
-  const files: DiffFileHeaderFields[] = useLazyDiff ? v2Files : v1Files;
-  const diffPayloadError = useLazyDiff ? v2DiffPayloadError : v1DiffPayloadError;
-  const isDiffLoading = useLazyDiff ? isV2DiffLoading : isV1DiffLoading;
-  const isDiffFetching = useLazyDiff ? isV2DiffFetching : isV1DiffFetching;
-  const isDiffError = useLazyDiff ? isV2DiffError : isV1DiffError;
-  const diffError = useLazyDiff ? v2DiffError : v1DiffError;
-  const refreshDiff = useLazyDiff ? refreshV2Diff : refreshV1Diff;
   const {
     status: prStatus,
     githubFeaturesEnabled,
@@ -941,15 +903,11 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
         stickyIndices.push(items.length - 1);
       }
       if (isExpanded) {
-        if (useLazyDiff) {
-          items.push({ type: "lazy-body", file: file as DiffFileMetadata, fileIndex: i });
-        } else {
-          items.push({ type: "body", file: file as ParsedDiffFile, fileIndex: i });
-        }
+        items.push({ type: "lazy-body", file: file as DiffFileMetadata, fileIndex: i });
       }
     }
     return { flatItems: items, stickyHeaderIndices: stickyIndices };
-  }, [expandedPaths, files, useLazyDiff]);
+  }, [expandedPaths, files]);
 
   const handleHeaderHeightChange = useCallback((path: string, height: number) => {
     if (!Number.isFinite(height) || height <= 0) {
@@ -1224,25 +1182,14 @@ export function GitDiffPane({ serverId, workspaceId, cwd, hideHeaderRow }: GitDi
           />
         );
       }
-      if (item.type === "lazy-body") {
-        return (
-          <LazyDiffFileBody
-            file={item.file}
-            serverId={serverId}
-            cwd={cwd}
-            mode={diffMode}
-            baseRef={baseRef}
-            ignoreWhitespace={changesPreferences.hideWhitespace}
-            layout={effectiveLayout}
-            wrapLines={wrapLines}
-            onBodyHeightChange={handleBodyHeightChange}
-            testID={`diff-file-${item.fileIndex}-body`}
-          />
-        );
-      }
       return (
-        <DiffFileBody
+        <LazyDiffFileBody
           file={item.file}
+          serverId={serverId}
+          cwd={cwd}
+          mode={diffMode}
+          baseRef={baseRef}
+          ignoreWhitespace={changesPreferences.hideWhitespace}
           layout={effectiveLayout}
           wrapLines={wrapLines}
           onBodyHeightChange={handleBodyHeightChange}

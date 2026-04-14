@@ -5,7 +5,6 @@ import {
   getServerCapabilities,
   getVoiceReadinessState,
   resolveVoiceUnavailableMessage,
-  supportsLazyDiffRpcs,
 } from "./server-info-capabilities";
 
 function buildServerInfo(capabilities?: ServerCapabilities): DaemonServerInfo {
@@ -116,44 +115,5 @@ describe("server-info-capabilities", () => {
         mode: "dictation",
       }),
     ).toBeNull();
-  });
-});
-
-describe("supportsLazyDiffRpcs", () => {
-  it("returns false when serverInfo is null", () => {
-    expect(supportsLazyDiffRpcs({ serverInfo: null })).toBe(false);
-  });
-
-  it("returns false when serverInfo is undefined", () => {
-    expect(supportsLazyDiffRpcs({ serverInfo: undefined })).toBe(false);
-  });
-
-  it("returns false when features is absent", () => {
-    const serverInfo = buildServerInfo();
-    expect(supportsLazyDiffRpcs({ serverInfo })).toBe(false);
-  });
-
-  it("returns false when lazyDiffRpcs is not set", () => {
-    const serverInfo: DaemonServerInfo = {
-      ...buildServerInfo(),
-      features: {},
-    };
-    expect(supportsLazyDiffRpcs({ serverInfo })).toBe(false);
-  });
-
-  it("returns true when lazyDiffRpcs is true", () => {
-    const serverInfo: DaemonServerInfo = {
-      ...buildServerInfo(),
-      features: { lazyDiffRpcs: true },
-    };
-    expect(supportsLazyDiffRpcs({ serverInfo })).toBe(true);
-  });
-
-  it("returns false when lazyDiffRpcs is false", () => {
-    const serverInfo: DaemonServerInfo = {
-      ...buildServerInfo(),
-      features: { lazyDiffRpcs: false },
-    };
-    expect(supportsLazyDiffRpcs({ serverInfo })).toBe(false);
   });
 });
