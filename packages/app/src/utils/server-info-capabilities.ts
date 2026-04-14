@@ -1,6 +1,12 @@
 import type { ServerCapabilityState } from "@server/shared/messages";
 import type { DaemonServerInfo } from "@/stores/session-store";
 
+export function supportsLazyDiffRpcs(params: {
+  serverInfo: DaemonServerInfo | null | undefined;
+}): boolean {
+  return params.serverInfo?.features?.lazyDiffRpcs === true;
+}
+
 export type VoiceReadinessMode = "dictation" | "voice";
 
 export function getServerCapabilities(params: {
