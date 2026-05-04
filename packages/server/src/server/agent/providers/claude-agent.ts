@@ -240,7 +240,7 @@ function resolveClaudeSpawnCommand(
   }
 
   return {
-    command: commandConfig.argv[0]!,
+    command: commandConfig.argv[0],
     args: [...commandConfig.argv.slice(1), ...spawnOptions.args],
   };
 }
@@ -404,7 +404,7 @@ function normalizeForDeterministicString(value: unknown, seen: WeakSet<object>):
     return value.map((entry) => normalizeForDeterministicString(entry, seen));
   }
   if (typeof value === "object") {
-    const objectValue = value as object;
+    const objectValue = value;
     if (seen.has(objectValue)) {
       return "[circular]";
     }
@@ -1285,7 +1285,7 @@ async function resolveClaudeVersion(
   try {
     if (command?.mode === "replace") {
       const { stdout } = await execCommand(
-        command.argv[0]!,
+        command.argv[0],
         [...command.argv.slice(1), "--version"],
         { ...envSpec, timeout: 5_000 },
       );
@@ -1337,7 +1337,7 @@ async function resolveClaudeAuth(
   try {
     let result: { stdout: string; stderr: string };
     if (command?.mode === "replace") {
-      result = await run(command.argv[0]!, [...command.argv.slice(1), "auth", "status"]);
+      result = await run(command.argv[0], [...command.argv.slice(1), "auth", "status"]);
     } else {
       const executable = await findExecutable("claude");
       if (!executable) {
