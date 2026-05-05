@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, type Dialog, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { openSettings } from "./app";
 import { openSettingsHost } from "./settings";
 
@@ -38,8 +38,9 @@ export async function loadRealDaemonState(): Promise<RealDaemonState> {
   try {
     const raw = readFileSync(`${paseoHome}/paseo.pid`, "utf8");
     pid = (JSON.parse(raw) as PidFileContent).pid ?? null;
-  } catch {
+  } catch (err) {
     // PID file may not be present yet on a very fresh daemon start
+    console.warn("[desktop-updates] paseo.pid not found:", err);
   }
 
   return { version: data.version, pid, logPath: `${paseoHome}/daemon.log` };
@@ -56,6 +57,17 @@ export interface DesktopBridgeConfig {
   daemonLogPath?: string;
   /** Initial manageBuiltInDaemon setting. Defaults to false. */
   manageBuiltInDaemon?: boolean;
+  /**
+   * Controls what dialog.ask returns when the daemon management confirm dialog
+   * fires. True = confirm (proceed with the action), false = cancel. Defaults to
+   * false so tests that only assert copy don't inadvertently trigger state changes.
+   */
+  confirmShouldAccept?: boolean;
+}
+
+export interface ConfirmDialogCall {
+  message: string;
+  title: string | undefined;
 }
 
 /**
@@ -64,6 +76,8 @@ export interface DesktopBridgeConfig {
  * auto-updater never fires. Daemon start/stop commands are stateful: the mock
  * tracks running state and assigns a fresh PID on each start, letting tests
  * observe PID changes without touching the real E2E daemon process.
+ * dialog.ask captures call arguments on window.__capturedDialogCall so tests
+ * can assert dialog copy without depending on window.confirm concatenation.
  */
 export async function injectDesktopBridge(page: Page, config: DesktopBridgeConfig): Promise<void> {
   await page.addInitScript((cfg) => {
@@ -159,12 +173,22 @@ export async function injectDesktopBridge(page: Page, config: DesktopBridgeConfi
         if (command === "start_desktop_daemon") {
           startCount += 1;
           daemonRunning = true;
-          // Assign a fresh PID on each start so tests can observe the change
-          currentPid = (cfg.daemonPid ?? 10000) + startCount * 1000;
+          // First start (bootstrap) returns the configured PID; subsequent starts
+          // (after a stop) get a fresh PID so tests can observe the change.
+          currentPid = (cfg.daemonPid ?? 10000) + (startCount - 1) * 1000;
           return buildDaemonStatus();
         }
 
         return null;
+      },
+      dialog: {
+        ask: async (message: string, options?: Record<string, unknown>) => {
+          (window as unknown as Record<string, unknown>).__capturedDialogCall = {
+            message,
+            title: options?.title,
+          };
+          return cfg.confirmShouldAccept ?? false;
+        },
       },
       getPendingOpenProject: async () => null,
       events: { on: async () => () => undefined },
@@ -187,46 +211,42 @@ export async function expectUpdateBanner(page: Page, version: string): Promise<v
 }
 
 export async function clickInstallUpdate(page: Page): Promise<void> {
-  await page.getByTestId("update-callout-action-1").click();
+  await page.getByRole("button", { name: "Install & restart" }).click();
 }
 
 export async function expectInstallInProgress(page: Page): Promise<void> {
-  await expect(page.getByTestId("update-callout-action-1")).toHaveText("Installing...");
+  await expect(page.getByRole("button", { name: "Installing..." })).toBeVisible();
 }
 
 /**
- * Clicks the daemon management switch and awaits the browser confirm dialog.
- * The click is fire-and-forget so the dialog fires before we await the promise.
- * Returns the dialog so callers can assert copy then accept or dismiss.
+ * Clicks the daemon management switch and waits for dialog.ask to fire in the
+ * mock, then returns the captured call args (message + title). The mock auto-
+ * dismisses via confirmShouldAccept=false so callers can assert copy without
+ * worrying about state changes.
  */
-export async function interceptDaemonManagementConfirmDialog(page: Page): Promise<Dialog> {
-  const dialogPromise = page.waitForEvent("dialog");
-  void page.getByRole("switch", { name: "Manage built-in daemon" }).click();
-  return dialogPromise;
+export async function interceptDaemonManagementConfirmDialog(
+  page: Page,
+): Promise<ConfirmDialogCall> {
+  await page.getByRole("switch", { name: "Manage built-in daemon" }).click();
+  await page.waitForFunction(
+    () => !!(window as unknown as Record<string, unknown>).__capturedDialogCall,
+    { timeout: 5_000 },
+  );
+  return page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__capturedDialogCall as ConfirmDialogCall,
+  );
 }
 
 export async function toggleDaemonManagement(
   page: Page,
-  action: "enable" | "disable",
+  _action: "enable" | "disable",
 ): Promise<void> {
-  if (action === "disable") {
-    const accepted = new Promise<void>((resolve) => {
-      page.once("dialog", async (dialog) => {
-        await dialog.accept();
-        resolve();
-      });
-    });
-    await page.getByRole("switch", { name: "Manage built-in daemon" }).click();
-    await accepted;
-  } else {
-    await page.getByRole("switch", { name: "Manage built-in daemon" }).click();
-  }
+  await page.getByRole("switch", { name: "Manage built-in daemon" }).click();
 }
 
-export function expectDaemonManagementConfirmDialog(dialog: Dialog): void {
-  expect(dialog.type()).toBe("confirm");
-  expect(dialog.message()).toContain("Pause built-in daemon");
-  expect(dialog.message()).toContain("stop the built-in daemon immediately");
+export function expectDaemonManagementConfirmDialog(args: ConfirmDialogCall): void {
+  expect(args.title).toBe("Pause built-in daemon");
+  expect(args.message).toContain("stop the built-in daemon immediately");
 }
 
 export async function expectDaemonManagementEnabled(page: Page): Promise<void> {

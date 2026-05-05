@@ -25,6 +25,8 @@ function getSeededServerId(): string {
   return serverId;
 }
 
+// No Playwright Electron runner exists; we simulate the desktop bridge via
+// addInitScript so Electron-gated UI activates without a real Electron process.
 test.describe("Desktop updates", () => {
   test("update banner appears in the sidebar when an app update is available", async ({ page }) => {
     await injectDesktopBridge(page, {
@@ -60,12 +62,13 @@ test.describe("Desktop daemon management", () => {
     await injectDesktopBridge(page, {
       serverId,
       manageBuiltInDaemon: true,
+      confirmShouldAccept: false,
     });
     await gotoAppShell(page);
     await openDesktopSettings(page, serverId);
 
-    const dialog = await interceptDaemonManagementConfirmDialog(page);
-    expectDaemonManagementConfirmDialog(dialog);
+    const dialogArgs = await interceptDaemonManagementConfirmDialog(page);
+    expectDaemonManagementConfirmDialog(dialogArgs);
 
     await expectDaemonManagementEnabled(page);
   });
@@ -75,12 +78,13 @@ test.describe("Desktop daemon management", () => {
     await injectDesktopBridge(page, {
       serverId,
       manageBuiltInDaemon: true,
+      confirmShouldAccept: false,
     });
     await gotoAppShell(page);
     await openDesktopSettings(page, serverId);
 
     await expectDaemonManagementEnabled(page);
-    await interceptDaemonManagementConfirmDialog(page);
+    await toggleDaemonManagement(page, "disable");
     await expectDaemonManagementEnabled(page);
   });
 
@@ -89,6 +93,7 @@ test.describe("Desktop daemon management", () => {
     await injectDesktopBridge(page, {
       serverId,
       manageBuiltInDaemon: true,
+      confirmShouldAccept: true,
     });
     await gotoAppShell(page);
     await openDesktopSettings(page, serverId);
@@ -127,6 +132,7 @@ test.describe("Desktop daemon management", () => {
       daemonPid: realState.pid,
       daemonVersion: realState.version,
       daemonLogPath: realState.logPath,
+      confirmShouldAccept: true,
     });
     await gotoAppShell(page);
     await openDesktopSettings(page, serverId);
