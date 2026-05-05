@@ -99,6 +99,7 @@ export function Switch({
       hitSlop={8}
       accessibilityRole="switch"
       accessibilityState={accessibilityState}
+      aria-checked={value}
       accessibilityLabel={accessibilityLabel}
       testID={testID}
       style={pressableStyle}
