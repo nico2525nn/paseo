@@ -253,6 +253,9 @@ describe("SidebarSessionsView row navigation", () => {
         serverId={SERVER_ID}
         projects={projects()}
         filter={ALL_SESSIONS_FILTER}
+        groupByProject={false}
+        expandedProjects={new Set()}
+        onProjectExpandedToggle={vi.fn()}
       />,
     );
 
@@ -280,6 +283,9 @@ describe("SidebarSessionsView row navigation", () => {
         serverId={SERVER_ID}
         projects={projects()}
         filter={ALL_SESSIONS_FILTER}
+        groupByProject={false}
+        expandedProjects={new Set()}
+        onProjectExpandedToggle={vi.fn()}
       />,
     );
     useSessionStore.getState().setWorkspaces(SERVER_ID, new Map());

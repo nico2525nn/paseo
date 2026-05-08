@@ -11,6 +11,32 @@ export interface SidebarSessionFilterAvailability {
   projectKeys: readonly string[];
 }
 
+export interface SidebarSessionGroup {
+  projectKey: string;
+  projectName: string;
+  projectIconKey: string | null;
+  visibleIds: readonly string[];
+  hiddenCount: number;
+  isExpanded: boolean;
+  totalCount: number;
+}
+
+export interface SidebarSessionAgentProject {
+  id: string;
+  projectKey: string;
+  projectName: string;
+  projectIconKey: string | null;
+}
+
+interface SidebarSessionGroupDraft {
+  projectKey: string;
+  projectName: string;
+  projectIconKey: string | null;
+  ids: string[];
+}
+
+const DEFAULT_GROUPED_SESSION_LIMIT = 6;
+
 function executionKey(serverId: string, cwd: string): string {
   return `${serverId}:${cwd}`;
 }
@@ -118,4 +144,41 @@ export function deriveSidebarSessionFilterProjects(input: {
   }
 
   return projects;
+}
+
+export function deriveGroupedSidebarSessions(input: {
+  agentsWithProjects: readonly SidebarSessionAgentProject[];
+  expandedProjects: ReadonlySet<string>;
+  limit?: number;
+}): readonly SidebarSessionGroup[] {
+  const limit = input.limit ?? DEFAULT_GROUPED_SESSION_LIMIT;
+  const groupsByProject = new Map<string, SidebarSessionGroupDraft>();
+
+  for (const agent of input.agentsWithProjects) {
+    let group = groupsByProject.get(agent.projectKey);
+    if (!group) {
+      group = {
+        projectKey: agent.projectKey,
+        projectName: agent.projectName,
+        projectIconKey: agent.projectIconKey,
+        ids: [],
+      };
+      groupsByProject.set(agent.projectKey, group);
+    }
+    group.ids.push(agent.id);
+  }
+
+  return Array.from(groupsByProject.values(), (group) => {
+    const isExpanded = input.expandedProjects.has(group.projectKey);
+    const visibleIds = isExpanded ? group.ids : group.ids.slice(0, limit);
+    return {
+      projectKey: group.projectKey,
+      projectName: group.projectName,
+      projectIconKey: group.projectIconKey,
+      visibleIds,
+      hiddenCount: isExpanded ? 0 : Math.max(0, group.ids.length - limit),
+      isExpanded,
+      totalCount: group.ids.length,
+    };
+  });
 }

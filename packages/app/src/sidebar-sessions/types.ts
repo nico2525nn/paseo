@@ -11,7 +11,13 @@ export interface SidebarSessionWorkspace {
   workspaceName: string;
   projectKey: string;
   projectName: string;
+  projectIconKey: string | null;
   workspaceDirectory: string;
 }
+
+export type ResolvedSidebarSessionProject = Pick<
+  SidebarSessionWorkspace,
+  "projectKey" | "projectName" | "projectIconKey"
+>;
 
 export type SidebarSessionAgent = Pick<AggregatedAgent, "id" | "serverId" | "cwd" | "archivedAt">;

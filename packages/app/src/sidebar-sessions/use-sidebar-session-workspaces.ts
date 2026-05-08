@@ -65,6 +65,7 @@ export function useSidebarSessionWorkspaces(input: {
           workspaceName: workspaceFields.name,
           projectKey: project.projectKey,
           projectName: project.projectName,
+          projectIconKey: project.iconWorkingDir || null,
           workspaceDirectory,
         });
       }

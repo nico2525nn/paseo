@@ -27,22 +27,36 @@ import { formatTimeAgo } from "@/utils/time";
 import {
   createSidebarSessionWorkspaceLookup,
   resolveSidebarSessionWorkspaceId,
+  resolveSidebarSessionWorkspace,
   shouldIncludeSidebarSessionAgent,
 } from "./session-filtering";
 import { selectSidebarSessionSlice } from "./select-sidebar-session-slice";
-import type { SidebarSessionFilter } from "./types";
+import type { ResolvedSidebarSessionProject, SidebarSessionFilter } from "./types";
 import { useSidebarSessionWorkspaces } from "./use-sidebar-session-workspaces";
+import {
+  SidebarSessionGroupFooter,
+  SidebarSessionGroupHeader,
+  type SidebarSessionListItem,
+  useGroupedSidebarSessionListData,
+  useOrderedAgentProjectShape,
+} from "./grouped-view";
 
 interface SidebarSessionsViewProps {
   serverId: string | null;
   projects: readonly SidebarProjectEntry[];
   filter: SidebarSessionFilter;
+  groupByProject: boolean;
+  expandedProjects: ReadonlySet<string>;
+  onProjectExpandedToggle: (projectKey: string) => void;
 }
 
 export function SidebarSessionsView({
   serverId,
   projects,
   filter,
+  groupByProject,
+  expandedProjects,
+  onProjectExpandedToggle,
 }: SidebarSessionsViewProps): ReactElement {
   const isInitialLoad = useAggregatedAgentsInitialLoad();
   const workspaces = useSidebarSessionWorkspaces({ serverId, projects });
@@ -60,15 +74,49 @@ export function SidebarSessionsView({
     filter: filterAgent,
     sort: "createdAt-desc-stable",
   });
+  const resolveCwdToProject = useCallback(
+    (cwd: string) => {
+      if (!serverId) {
+        return null;
+      }
+      const workspace = resolveSidebarSessionWorkspace(lookup, {
+        id: "",
+        serverId,
+        cwd,
+        archivedAt: null,
+      });
+      if (!workspace) {
+        return null;
+      }
+      return {
+        projectKey: workspace.projectKey,
+        projectName: workspace.projectName,
+        projectIconKey: workspace.projectIconKey,
+      };
+    },
+    [lookup, serverId],
+  );
 
   if (isInitialLoad) {
     return <SidebarAgentListSkeleton />;
   }
 
-  return <SidebarSessionsList serverId={serverId} sessionIds={sessionIds} />;
+  if (groupByProject) {
+    return (
+      <GroupedSidebarSessionsList
+        serverId={serverId}
+        sessionIds={sessionIds}
+        resolveCwdToProject={resolveCwdToProject}
+        expandedProjects={expandedProjects}
+        onProjectExpandedToggle={onProjectExpandedToggle}
+      />
+    );
+  }
+
+  return <FlatSidebarSessionsList serverId={serverId} sessionIds={sessionIds} />;
 }
 
-const SidebarSessionsList = memo(function SidebarSessionsList({
+const FlatSidebarSessionsList = memo(function FlatSidebarSessionsList({
   serverId,
   sessionIds,
 }: {
@@ -84,6 +132,81 @@ const SidebarSessionsList = memo(function SidebarSessionsList({
   return (
     <FlatList
       data={sessionIds}
+      style={styles.list}
+      contentContainerStyle={styles.listContent}
+      keyExtractor={keyExtractor}
+      renderItem={renderItem}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+      ListEmptyComponent={EmptySessions}
+    />
+  );
+});
+
+const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
+  serverId,
+  sessionIds,
+  resolveCwdToProject,
+  expandedProjects,
+  onProjectExpandedToggle,
+}: {
+  serverId: string | null;
+  sessionIds: readonly string[];
+  resolveCwdToProject: (cwd: string) => ResolvedSidebarSessionProject | null;
+  expandedProjects: ReadonlySet<string>;
+  onProjectExpandedToggle: (projectKey: string) => void;
+}): ReactElement {
+  const agentsWithProjects = useOrderedAgentProjectShape({
+    orderedIds: sessionIds,
+    serverId: serverId ?? "",
+    resolveCwdToProject,
+  });
+  const data = useGroupedSidebarSessionListData({
+    agentsWithProjects,
+    expandedProjects,
+    serverId,
+  });
+
+  const renderItem: ListRenderItem<SidebarSessionListItem> = useCallback(
+    ({ item }) => {
+      switch (item.kind) {
+        case "header":
+          return (
+            <SidebarSessionGroupHeader
+              serverId={serverId}
+              projectName={item.projectName}
+              projectIconKey={item.projectIconKey}
+            />
+          );
+        case "row":
+          return <SidebarSessionRow id={item.id} serverId={item.serverId} />;
+        case "footer":
+          return (
+            <SidebarSessionGroupFooter
+              projectKey={item.projectKey}
+              hiddenCount={item.hiddenCount}
+              isExpanded={item.isExpanded}
+              onPress={onProjectExpandedToggle}
+            />
+          );
+      }
+    },
+    [onProjectExpandedToggle, serverId],
+  );
+  const keyExtractor = useCallback((item: SidebarSessionListItem) => {
+    switch (item.kind) {
+      case "header":
+        return `header:${item.projectKey}`;
+      case "row":
+        return `row:${item.id}`;
+      case "footer":
+        return `footer:${item.projectKey}`;
+    }
+  }, []);
+
+  return (
+    <FlatList
+      data={data}
       style={styles.list}
       contentContainerStyle={styles.listContent}
       keyExtractor={keyExtractor}

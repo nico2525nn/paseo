@@ -2,7 +2,6 @@ import {
   View,
   Text,
   Pressable,
-  Image,
   Platform,
   ActivityIndicator,
   StatusBar,
@@ -85,7 +84,6 @@ import { useCheckoutGitActionsStore } from "@/stores/checkout-git-actions-store"
 import { hasVisibleOrderChanged, mergeWithRemainder } from "@/utils/sidebar-reorder";
 import { decideLongPressMove } from "@/utils/sidebar-gesture-arbitration";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";
 import { shouldRenderSyncedStatusLoader } from "@/utils/status-loader";
 import { isEmphasizedStatusDotBucket } from "@/utils/status-dot-color";
 import type { SidebarStateBucket } from "@/utils/sidebar-agent-state";
@@ -114,6 +112,10 @@ import {
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
+import {
+  SidebarProjectIcon,
+  SidebarProjectRowVisual,
+} from "@/components/sidebar/sidebar-project-row-visual";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -505,8 +507,6 @@ function ProjectLeadingVisual({
   showChevron?: boolean;
   isArchiving?: boolean;
 }) {
-  const placeholderLabel = projectIconPlaceholderLabelFromDisplayName(displayName);
-  const placeholderInitial = placeholderLabel.charAt(0).toUpperCase();
   const activeWorkspace = workspace;
   const shouldShowWorkspaceStatus =
     activeWorkspace !== null && (isArchiving || activeWorkspace.statusBucket !== "done");
@@ -523,17 +523,13 @@ function ProjectLeadingVisual({
   }
 
   if (!shouldShowWorkspaceStatus || !activeWorkspace) {
-    return (
-      <View style={styles.projectLeadingVisualSlot}>
-        <ProjectIcon iconDataUri={iconDataUri} placeholderInitial={placeholderInitial} />
-      </View>
-    );
+    return <SidebarProjectIcon projectName={displayName} iconDataUri={iconDataUri} />;
   }
 
   return (
     <ProjectLeadingVisualStatus
+      displayName={displayName}
       iconDataUri={iconDataUri}
-      placeholderInitial={placeholderInitial}
       isArchiving={isArchiving}
       shouldShowSyncedLoader={shouldShowSyncedLoader}
       activeWorkspace={activeWorkspace}
@@ -794,33 +790,15 @@ function WorkspaceKebabMenu({
   );
 }
 
-function ProjectIcon({
-  iconDataUri,
-  placeholderInitial,
-}: {
-  iconDataUri: string | null;
-  placeholderInitial: string;
-}) {
-  const imageSource = useMemo(() => ({ uri: iconDataUri ?? "" }), [iconDataUri]);
-  if (iconDataUri) {
-    return <Image source={imageSource} style={styles.projectIcon} />;
-  }
-  return (
-    <View style={styles.projectIconFallback}>
-      <Text style={styles.projectIconFallbackText}>{placeholderInitial}</Text>
-    </View>
-  );
-}
-
 function ProjectLeadingVisualStatus({
+  displayName,
   iconDataUri,
-  placeholderInitial,
   isArchiving,
   shouldShowSyncedLoader,
   activeWorkspace,
 }: {
+  displayName: string;
   iconDataUri: string | null;
-  placeholderInitial: string;
   isArchiving: boolean;
   shouldShowSyncedLoader: boolean;
   activeWorkspace: SidebarWorkspaceEntry;
@@ -860,7 +838,7 @@ function ProjectLeadingVisualStatus({
 
   return (
     <View style={styles.projectLeadingVisualSlot}>
-      <ProjectIcon iconDataUri={iconDataUri} placeholderInitial={placeholderInitial} />
+      <SidebarProjectIcon projectName={displayName} iconDataUri={iconDataUri} />
       {dotColorStyle ? (
         <StatusDotOverlay
           dotColorStyle={dotColorStyle}
@@ -1235,25 +1213,27 @@ function ProjectHeaderRow({
     ],
     [isDragging, selected, isHovered],
   );
+  const projectLeadingVisual = useMemo(
+    () => (
+      <ProjectLeadingVisual
+        displayName={displayName}
+        iconDataUri={iconDataUri}
+        workspace={workspace}
+        chevron={chevron}
+        showChevron={isHovered && chevron !== null}
+        isArchiving={isArchiving}
+      />
+    ),
+    [chevron, displayName, iconDataUri, isArchiving, isHovered, workspace],
+  );
 
   const rowChildren = (
     <>
-      <View style={styles.projectRowLeft}>
-        <ProjectLeadingVisual
-          displayName={displayName}
-          iconDataUri={iconDataUri}
-          workspace={workspace}
-          chevron={chevron}
-          showChevron={isHovered && chevron !== null}
-          isArchiving={isArchiving}
-        />
-
-        <View style={styles.projectTitleGroup}>
-          <Text style={styles.projectTitle} numberOfLines={1}>
-            {displayName}
-          </Text>
-        </View>
-      </View>
+      <SidebarProjectRowVisual
+        projectName={displayName}
+        iconDataUri={iconDataUri}
+        leadingVisual={projectLeadingVisual}
+      />
       <ProjectRowTrailingActions
         project={project}
         displayName={displayName}
@@ -2651,25 +2631,6 @@ const styles = StyleSheet.create((theme) => ({
     zIndex: 3,
     ...theme.shadow.md,
   },
-  projectRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[2],
-    flex: 1,
-    minWidth: 0,
-  },
-  projectTitleGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.spacing[1],
-    flex: 1,
-    minWidth: 0,
-  },
-  projectIcon: {
-    width: "100%",
-    height: "100%",
-    borderRadius: theme.borderRadius.sm,
-  },
   projectLeadingVisualSlot: {
     position: "relative",
     width: theme.iconSize.md,
@@ -2677,26 +2638,6 @@ const styles = StyleSheet.create((theme) => ({
     flexShrink: 0,
     alignItems: "center",
     justifyContent: "center",
-  },
-  projectIconFallback: {
-    width: "100%",
-    height: "100%",
-    borderRadius: theme.borderRadius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  projectIconFallbackText: {
-    color: theme.colors.foregroundMuted,
-    fontSize: 9,
-  },
-  projectTitle: {
-    color: theme.colors.foreground,
-    fontSize: theme.fontSize.sm,
-    fontWeight: "400",
-    minWidth: 0,
-    flexShrink: 1,
   },
   projectActionButton: {
     flexDirection: "row",

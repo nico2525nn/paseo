@@ -90,6 +90,10 @@ interface SidebarSharedProps {
   setSidebarViewMode: (mode: SidebarSessionViewMode) => void;
   sidebarSessionFilter: SidebarSessionFilter;
   setSidebarSessionFilter: (filter: SidebarSessionFilter) => void;
+  groupByProject: boolean;
+  expandedProjects: ReadonlySet<string>;
+  setGroupByProject: (next: boolean) => void;
+  toggleProjectExpanded: (projectKey: string) => void;
   hostOptions: ComboboxOption[];
   hostTriggerRef: RefObject<View | null>;
   isHostPickerOpen: boolean;
@@ -192,8 +196,16 @@ export const LeftSidebar = memo(function LeftSidebar({
   );
   const hostTriggerRef = useRef<View | null>(null);
   const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
-  const { sidebarViewMode, setSidebarViewMode, sidebarSessionFilter, setSidebarSessionFilter } =
-    useSidebarSessionsController({ serverId: activeServerId });
+  const {
+    sidebarViewMode,
+    setSidebarViewMode,
+    sidebarSessionFilter,
+    setSidebarSessionFilter,
+    groupByProject,
+    expandedProjects,
+    setGroupByProject,
+    toggleProjectExpanded,
+  } = useSidebarSessionsController({ serverId: activeServerId });
 
   const { projects, isInitialLoad, isRevalidating, refreshAll } = useSidebarWorkspacesList({
     serverId: activeServerId,
@@ -263,6 +275,10 @@ export const LeftSidebar = memo(function LeftSidebar({
     setSidebarViewMode,
     sidebarSessionFilter,
     setSidebarSessionFilter,
+    groupByProject,
+    expandedProjects,
+    setGroupByProject,
+    toggleProjectExpanded,
     hostOptions,
     hostTriggerRef,
     isHostPickerOpen,
@@ -505,6 +521,10 @@ function MobileSidebar({
   setSidebarViewMode,
   sidebarSessionFilter,
   setSidebarSessionFilter,
+  groupByProject,
+  expandedProjects,
+  setGroupByProject,
+  toggleProjectExpanded,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -689,15 +709,19 @@ function MobileSidebar({
         mode={sidebarViewMode}
         filter={sidebarSessionFilter}
         projects={projects}
+        groupByProject={groupByProject}
         onModeChange={setSidebarViewMode}
         onFilterChange={setSidebarSessionFilter}
+        onGroupByProjectChange={setGroupByProject}
       />
     ),
     [
       activeServerId,
+      groupByProject,
       projects,
       sidebarSessionFilter,
       sidebarViewMode,
+      setGroupByProject,
       setSidebarSessionFilter,
       setSidebarViewMode,
     ],
@@ -733,6 +757,9 @@ function MobileSidebar({
                 serverId={activeServerId}
                 projects={projects}
                 filter={sidebarSessionFilter}
+                groupByProject={groupByProject}
+                expandedProjects={expandedProjects}
+                onProjectExpandedToggle={toggleProjectExpanded}
               />
             )}
 
@@ -766,6 +793,10 @@ function DesktopSidebar({
   setSidebarViewMode,
   sidebarSessionFilter,
   setSidebarSessionFilter,
+  groupByProject,
+  expandedProjects,
+  setGroupByProject,
+  toggleProjectExpanded,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -847,15 +878,19 @@ function DesktopSidebar({
         mode={sidebarViewMode}
         filter={sidebarSessionFilter}
         projects={projects}
+        groupByProject={groupByProject}
         onModeChange={setSidebarViewMode}
         onFilterChange={setSidebarSessionFilter}
+        onGroupByProjectChange={setGroupByProject}
       />
     ),
     [
       activeServerId,
+      groupByProject,
       projects,
       sidebarSessionFilter,
       sidebarViewMode,
+      setGroupByProject,
       setSidebarSessionFilter,
       setSidebarViewMode,
     ],
@@ -893,6 +928,9 @@ function DesktopSidebar({
             serverId={activeServerId}
             projects={projects}
             filter={sidebarSessionFilter}
+            groupByProject={groupByProject}
+            expandedProjects={expandedProjects}
+            onProjectExpandedToggle={toggleProjectExpanded}
           />
         )}
 

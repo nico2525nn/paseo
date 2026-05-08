@@ -1,4 +1,11 @@
-import { Folder, Folders, ListFilter, MessagesSquare, type LucideIcon } from "lucide-react-native";
+import {
+  Folder,
+  Folders,
+  LayoutList,
+  ListFilter,
+  MessagesSquare,
+  type LucideIcon,
+} from "lucide-react-native";
 import { memo, useCallback, useMemo, type ReactElement } from "react";
 import { Image, Pressable, Text, View, type PressableStateCallbackType } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
@@ -20,8 +27,10 @@ interface SidebarSessionsToggleProps {
   mode: SidebarSessionViewMode;
   filter: SidebarSessionFilter;
   projects: readonly SidebarProjectEntry[];
+  groupByProject: boolean;
   onModeChange: (mode: SidebarSessionViewMode) => void;
   onFilterChange: (filter: SidebarSessionFilter) => void;
+  onGroupByProjectChange: (next: boolean) => void;
 }
 
 const PILL_TRANSITION = LinearTransition.duration(160);
@@ -32,8 +41,10 @@ export const SidebarSessionsToggle = memo(function SidebarSessionsToggle({
   mode,
   filter,
   projects,
+  groupByProject,
   onModeChange,
   onFilterChange,
+  onGroupByProjectChange,
 }: SidebarSessionsToggleProps): ReactElement {
   const sessionsActive = mode === "sessions";
 
@@ -67,7 +78,9 @@ export const SidebarSessionsToggle = memo(function SidebarSessionsToggle({
           serverId={serverId}
           filter={filter}
           projects={projects}
+          groupByProject={groupByProject}
           onFilterChange={onFilterChange}
+          onGroupByProjectChange={onGroupByProjectChange}
         />
       ) : null}
     </View>
@@ -78,12 +91,16 @@ function SidebarSessionsFilterMenu({
   serverId,
   filter,
   projects,
+  groupByProject,
   onFilterChange,
+  onGroupByProjectChange,
 }: {
   serverId: string | null;
   filter: SidebarSessionFilter;
   projects: readonly SidebarProjectEntry[];
+  groupByProject: boolean;
   onFilterChange: (filter: SidebarSessionFilter) => void;
+  onGroupByProjectChange: (next: boolean) => void;
 }) {
   const { theme } = useUnistyles();
   const filterActive = filter.type !== "all";
@@ -110,41 +127,71 @@ function SidebarSessionsFilterMenu({
     ),
     [filterActive, theme.colors.foreground, theme.colors.foregroundMuted, theme.iconSize.sm],
   );
+  const handleGroupByProjectPress = useCallback(() => {
+    onGroupByProjectChange(!groupByProject);
+  }, [groupByProject, onGroupByProjectChange]);
+  const groupByProjectStyle = useCallback(
+    ({ hovered = false }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.filterButton,
+      (hovered || groupByProject) && styles.filterButtonHovered,
+    ],
+    [groupByProject],
+  );
+  const groupByProjectIcon = useMemo(
+    () => (
+      <LayoutList
+        size={theme.iconSize.sm}
+        color={groupByProject ? theme.colors.foreground : theme.colors.foregroundMuted}
+      />
+    ),
+    [groupByProject, theme.colors.foreground, theme.colors.foregroundMuted, theme.iconSize.sm],
+  );
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        accessibilityLabel="Filter sessions"
+    <View style={styles.sessionActions}>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          accessibilityLabel="Filter sessions"
+          accessibilityRole="button"
+          style={filterTriggerStyle}
+          testID="sidebar-sessions-filter-trigger"
+        >
+          {filterIcon}
+          {filterActive ? <View style={styles.filterBadge} /> : null}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" width={260} scrollable maxHeight={420}>
+          <DropdownMenuItem selected={filter.type === "all"} onSelect={handleAllSelect}>
+            All
+          </DropdownMenuItem>
+          {visibleFilterProjects.length > 0 ? (
+            <>
+              <DropdownMenuSeparator />
+              <FilterSectionHeading>Project</FilterSectionHeading>
+              {visibleFilterProjects.map((project) => (
+                <ProjectFilterItem
+                  key={project.projectKey}
+                  selected={filter.type === "project" && filter.projectKey === project.projectKey}
+                  label={project.projectName}
+                  projectKey={project.projectKey}
+                  serverId={serverId}
+                  iconWorkingDir={project.iconWorkingDir}
+                  onFilterChange={onFilterChange}
+                />
+              ))}
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Pressable
+        accessibilityLabel="Group by project"
         accessibilityRole="button"
-        style={filterTriggerStyle}
-        testID="sidebar-sessions-filter-trigger"
+        onPress={handleGroupByProjectPress}
+        style={groupByProjectStyle}
+        testID="sidebar-toggle-group-by-project"
       >
-        {filterIcon}
-        {filterActive ? <View style={styles.filterBadge} /> : null}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" width={260} scrollable maxHeight={420}>
-        <DropdownMenuItem selected={filter.type === "all"} onSelect={handleAllSelect}>
-          All
-        </DropdownMenuItem>
-        {visibleFilterProjects.length > 0 ? (
-          <>
-            <DropdownMenuSeparator />
-            <FilterSectionHeading>Project</FilterSectionHeading>
-            {visibleFilterProjects.map((project) => (
-              <ProjectFilterItem
-                key={project.projectKey}
-                selected={filter.type === "project" && filter.projectKey === project.projectKey}
-                label={project.projectName}
-                projectKey={project.projectKey}
-                serverId={serverId}
-                iconWorkingDir={project.iconWorkingDir}
-                onFilterChange={onFilterChange}
-              />
-            ))}
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+        {groupByProjectIcon}
+      </Pressable>
+    </View>
   );
 }
 
@@ -279,6 +326,11 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     gap: theme.spacing[1],
     minWidth: 0,
+  },
+  sessionActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing[1],
   },
   pill: {
     flexDirection: "row",
