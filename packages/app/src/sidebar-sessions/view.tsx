@@ -10,12 +10,16 @@ import {
 import { useShallow } from "zustand/shallow";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
-import { getProviderIcon } from "@/components/provider-icons";
 import {
   type AggregatedAgentIdEntry,
   useAggregatedAgentIds,
   useAggregatedAgentsInitialLoad,
 } from "@/hooks/use-aggregated-agents";
+import {
+  WorkspaceTabIcon,
+  WorkspaceTabPresentationResolver,
+} from "@/screens/workspace/workspace-tab-presentation";
+import type { WorkspaceTabDescriptor } from "@/screens/workspace/workspace-tabs-types";
 import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
 import { useSessionStore } from "@/stores/session-store";
 import { navigateToPreparedWorkspaceTab, prepareWorkspaceTab } from "@/utils/workspace-navigation";
@@ -149,12 +153,19 @@ const SidebarSessionRow = memo(function SidebarSessionRow({
   );
 
   const titleStyle = useMemo(() => [styles.title, isHovered && styles.titleHovered], [isHovered]);
+  const tabDescriptor = useMemo<WorkspaceTabDescriptor>(
+    () => ({
+      key: `agent_${id}`,
+      tabId: `agent_${id}`,
+      kind: "agent",
+      target: { kind: "agent", agentId: id },
+    }),
+    [id],
+  );
 
   if (!agent || agent.archivedAt) {
     return null;
   }
-
-  const ProviderIcon = getProviderIcon(agent.provider);
 
   return (
     <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
@@ -166,7 +177,20 @@ const SidebarSessionRow = memo(function SidebarSessionRow({
         testID={`sidebar-session-row-${serverId}-${id}`}
       >
         <View style={styles.providerIconWrap}>
-          <ProviderIcon size={theme.iconSize.sm} color={theme.colors.foregroundMuted} />
+          <WorkspaceTabPresentationResolver
+            tab={tabDescriptor}
+            serverId={serverId}
+            workspaceId="sidebar-sessions"
+          >
+            {(presentation) => (
+              <WorkspaceTabIcon
+                presentation={presentation}
+                active={isHovered}
+                size={theme.iconSize.sm}
+                statusDotBorderColor={isHovered ? theme.colors.surfaceSidebarHover : undefined}
+              />
+            )}
+          </WorkspaceTabPresentationResolver>
         </View>
         <Text style={titleStyle} numberOfLines={1}>
           {agent.title || "New session"}

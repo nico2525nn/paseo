@@ -29,13 +29,21 @@ const {
   navigateToPreparedWorkspaceTabMock: vi.fn(),
   prepareWorkspaceTabMock: vi.fn(),
   testTheme: {
-    borderRadius: { lg: 8 },
+    borderRadius: { full: 999, lg: 8 },
     colors: {
       foreground: "#111111",
       foregroundMuted: "#666666",
+      palette: {
+        amber: { 500: "#f59e0b", 700: "#b45309" },
+        blue: { 500: "#3b82f6" },
+        green: { 500: "#22c55e" },
+        red: { 500: "#ef4444" },
+      },
+      surface0: "#ffffff",
       surface2: "#eeeeee",
       surfaceSidebarHover: "#f5f5f5",
     },
+    colorScheme: "light",
     fontSize: { sm: 14, xs: 12 },
     fontWeight: { medium: "500" },
     iconSize: { md: 20, sm: 16 },
@@ -61,10 +69,34 @@ vi.mock("@/components/provider-icons", async () => {
   };
 });
 
+vi.mock("@/screens/workspace/workspace-tab-presentation", async () => {
+  const ReactModule = await import("react");
+  return {
+    WorkspaceTabPresentationResolver: ({ children }: { children: (presentation: {}) => unknown }) =>
+      children({}),
+    WorkspaceTabIcon: () =>
+      ReactModule.createElement("span", { "data-testid": "workspace-tab-icon" }),
+  };
+});
+
+vi.mock("react-native-reanimated", () => ({
+  default: {
+    View: "div",
+  },
+  Easing: {
+    linear: vi.fn(),
+  },
+  makeMutable: (value: unknown) => ({ value }),
+  useAnimatedStyle: (factory: () => unknown) => factory(),
+  withRepeat: (value: unknown) => value,
+  withTiming: (value: unknown) => value,
+}));
+
 vi.mock("react-native-unistyles", () => ({
   StyleSheet: {
     create: (styles: unknown) => (typeof styles === "function" ? styles(testTheme) : styles),
   },
+  withUnistyles: (Component: unknown) => Component,
   useUnistyles: () => ({
     theme: testTheme,
     rt: {},
