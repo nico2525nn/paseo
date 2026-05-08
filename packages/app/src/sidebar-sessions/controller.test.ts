@@ -14,14 +14,14 @@ describe("useSidebarSessionsController", () => {
 
     act(() => {
       result.current.setSidebarSessionFilter({
-        type: "workspace",
-        workspaceKey: "server-1:workspace-1",
+        type: "project",
+        projectKey: "project-a",
       });
     });
 
     expect(result.current.sidebarSessionFilter).toEqual({
-      type: "workspace",
-      workspaceKey: "server-1:workspace-1",
+      type: "project",
+      projectKey: "project-a",
     });
 
     rerender({ serverId: "server-2" });

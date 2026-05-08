@@ -8,7 +8,6 @@ export interface SidebarSessionWorkspaceLookup {
 }
 
 export interface SidebarSessionFilterAvailability {
-  workspaceKeys: readonly string[];
   projectKeys: readonly string[];
 }
 
@@ -75,9 +74,6 @@ export function shouldIncludeSidebarSessionAgent(input: {
   if (input.filter.type === "all") {
     return true;
   }
-  if (input.filter.type === "workspace") {
-    return workspace.workspaceKey === input.filter.workspaceKey;
-  }
   return workspace.projectKey === input.filter.projectKey;
 }
 
@@ -85,7 +81,6 @@ export function deriveSidebarSessionFilterAvailability(input: {
   agents: readonly SidebarSessionAgent[];
   lookup: SidebarSessionWorkspaceLookup;
 }): SidebarSessionFilterAvailability {
-  const workspaceKeys = new Set<string>();
   const projectKeys = new Set<string>();
 
   for (const agent of input.agents) {
@@ -96,12 +91,10 @@ export function deriveSidebarSessionFilterAvailability(input: {
     if (!workspace) {
       continue;
     }
-    workspaceKeys.add(workspace.workspaceKey);
     projectKeys.add(workspace.projectKey);
   }
 
   return {
-    workspaceKeys: Array.from(workspaceKeys).sort(),
     projectKeys: Array.from(projectKeys).sort(),
   };
 }
@@ -109,13 +102,11 @@ export function deriveSidebarSessionFilterAvailability(input: {
 export function deriveSidebarSessionFilterProjects(input: {
   projects: readonly SidebarProjectEntry[];
   availability: SidebarSessionFilterAvailability;
-  workspaceNameByKey: ReadonlyMap<string, string>;
 }): SidebarProjectEntry[] {
-  if (input.projects.length === 0 || input.availability.workspaceKeys.length === 0) {
+  if (input.projects.length === 0 || input.availability.projectKeys.length === 0) {
     return [];
   }
 
-  const visibleWorkspaceKeys = new Set(input.availability.workspaceKeys);
   const visibleProjectKeys = new Set(input.availability.projectKeys);
   const projects: SidebarProjectEntry[] = [];
 
@@ -123,16 +114,7 @@ export function deriveSidebarSessionFilterProjects(input: {
     if (!visibleProjectKeys.has(project.projectKey)) {
       continue;
     }
-    const workspaces = project.workspaces
-      .filter((workspace) => visibleWorkspaceKeys.has(workspace.workspaceKey))
-      .map((workspace) => {
-        const name = input.workspaceNameByKey.get(workspace.workspaceKey);
-        return name && name !== workspace.name ? Object.assign({}, workspace, { name }) : workspace;
-      });
-    if (workspaces.length === 0) {
-      continue;
-    }
-    projects.push({ ...project, workspaces });
+    projects.push(project);
   }
 
   return projects;

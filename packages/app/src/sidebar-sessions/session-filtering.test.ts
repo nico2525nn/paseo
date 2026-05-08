@@ -76,20 +76,6 @@ describe("sidebar session filtering", () => {
     expect(visibleIds).toEqual(["main", "docs", "api"]);
   });
 
-  it("filters by workspace", () => {
-    const lookup = createSidebarSessionWorkspaceLookup(WORKSPACES);
-
-    const visibleIds = AGENTS.filter((agent) =>
-      shouldIncludeSidebarSessionAgent({
-        agent,
-        filter: { type: "workspace", workspaceKey: "server-1:workspace-2" },
-        lookup,
-      }),
-    ).map((agent) => agent.id);
-
-    expect(visibleIds).toEqual(["docs"]);
-  });
-
   it("filters by project", () => {
     const lookup = createSidebarSessionWorkspaceLookup(WORKSPACES);
 
@@ -121,7 +107,6 @@ describe("sidebar session filtering", () => {
     });
 
     expect(availability).toEqual({
-      workspaceKeys: ["server-1:workspace-1"],
       projectKeys: ["project-a"],
     });
     const filterProjects = deriveSidebarSessionFilterProjects({
@@ -192,11 +177,13 @@ describe("sidebar session filtering", () => {
         },
       ],
       availability,
-      workspaceNameByKey: new Map([["server-1:workspace-1", "Main"]]),
     });
 
     expect(filterProjects.map(projectWorkspaceKeys)).toEqual([
-      { projectKey: "project-a", workspaceKeys: ["server-1:workspace-1"] },
+      {
+        projectKey: "project-a",
+        workspaceKeys: ["server-1:workspace-1", "server-1:workspace-3"],
+      },
     ]);
   });
 });

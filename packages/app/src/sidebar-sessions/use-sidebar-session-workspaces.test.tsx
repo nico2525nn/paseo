@@ -97,7 +97,7 @@ afterEach(() => {
 });
 
 describe("useVisibleSidebarSessionFilterProjects", () => {
-  it("uses the hydrated workspace branch label for workspace filter options", () => {
+  it("returns projects with mapped active sessions", () => {
     act(() => {
       useSessionStore.getState().initializeSession("server-1", {} as unknown as DaemonClient);
       useSessionStore.getState().setWorkspaces("server-1", new Map([["workspace-1", WORKSPACE]]));
@@ -111,8 +111,6 @@ describe("useVisibleSidebarSessionFilterProjects", () => {
       }),
     );
 
-    expect(result.current[0]?.workspaces[0]?.name).toBe("feat-foo");
-    expect(result.current[0]?.workspaces[0]?.name).not.toBe("/abs/path/to/repo");
-    expect(result.current[0]?.workspaces[0]?.name).not.toBe("repo");
+    expect(result.current.map((project) => project.projectKey)).toEqual(["project-a"]);
   });
 });

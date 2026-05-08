@@ -256,10 +256,6 @@ async function chooseSessionsFilter(page: Page, name: string | RegExp) {
   await page.getByRole("button", { name }).click();
 }
 
-async function chooseWorkspaceSessionsFilter(page: Page, workspaceId: string) {
-  await chooseSessionsFilter(page, new RegExp(`^${escapeRegex(workspaceId)}\\s`));
-}
-
 async function chooseProjectSessionsFilter(page: Page, projectName: string) {
   await chooseSessionsFilter(page, new RegExp(`^${escapeRegex(projectName)}$`));
 }
@@ -319,11 +315,6 @@ async function runSidebarHistorySessionsJourney(page: Page) {
     await switchSidebarToWorkspaces(page, seeded);
 
     await switchSidebarToSessions(page);
-    await chooseWorkspaceSessionsFilter(page, seeded.firstWorkspace.workspaceId);
-    await expectOnlySidebarSessionRows(page, {
-      visible: [middle, oldest],
-      hidden: [newest],
-    });
     await chooseProjectSessionsFilter(page, seeded.secondProjectName);
     await expectOnlySidebarSessionRows(page, {
       visible: [newest],
@@ -351,9 +342,7 @@ async function runSidebarHistorySessionsJourney(page: Page) {
 test.describe("Sidebar History Sessions journey", () => {
   test.describe.configure({ timeout: 300_000 });
 
-  test("toggles sessions, filters by workspace and project, and opens a session tab", async ({
-    page,
-  }) => {
+  test("toggles sessions, filters by project, and opens a session tab", async ({ page }) => {
     await runSidebarHistorySessionsJourney(page);
   });
 });

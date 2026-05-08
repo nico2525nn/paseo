@@ -129,22 +129,6 @@ function SidebarSessionsFilterMenu({
         {visibleFilterProjects.length > 0 ? (
           <>
             <DropdownMenuSeparator />
-            <FilterSectionHeading>Workspace</FilterSectionHeading>
-            {visibleFilterProjects.flatMap((project) =>
-              project.workspaces.map((workspace) => (
-                <WorkspaceFilterItem
-                  key={workspace.workspaceKey}
-                  selected={
-                    filter.type === "workspace" && filter.workspaceKey === workspace.workspaceKey
-                  }
-                  label={workspace.name}
-                  description={project.projectName}
-                  workspaceKey={workspace.workspaceKey}
-                  onFilterChange={onFilterChange}
-                />
-              )),
-            )}
-            <DropdownMenuSeparator />
             <FilterSectionHeading>Project</FilterSectionHeading>
             {visibleFilterProjects.map((project) => (
               <ProjectFilterItem
@@ -222,30 +206,6 @@ function FilterSectionHeading({ children }: { children: string }) {
     <View style={styles.filterSectionHeading}>
       <Text style={styles.filterSectionHeadingText}>{children}</Text>
     </View>
-  );
-}
-
-function WorkspaceFilterItem({
-  selected,
-  label,
-  description,
-  workspaceKey,
-  onFilterChange,
-}: {
-  selected: boolean;
-  label: string;
-  description: string;
-  workspaceKey: string;
-  onFilterChange: (filter: SidebarSessionFilter) => void;
-}) {
-  const handleSelect = useCallback(() => {
-    onFilterChange({ type: "workspace", workspaceKey });
-  }, [onFilterChange, workspaceKey]);
-
-  return (
-    <DropdownMenuItem selected={selected} description={description} onSelect={handleSelect}>
-      {label}
-    </DropdownMenuItem>
   );
 }
 

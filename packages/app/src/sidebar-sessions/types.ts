@@ -2,10 +2,7 @@ import type { AggregatedAgent } from "@/hooks/use-aggregated-agents";
 
 export type SidebarSessionViewMode = "workspaces" | "sessions";
 
-export type SidebarSessionFilter =
-  | { type: "all" }
-  | { type: "workspace"; workspaceKey: string }
-  | { type: "project"; projectKey: string };
+export type SidebarSessionFilter = { type: "all" } | { type: "project"; projectKey: string };
 
 export interface SidebarSessionWorkspace {
   serverId: string;

@@ -14,7 +14,7 @@ import {
 } from "./session-filtering";
 
 const EMPTY_WORKSPACES: SidebarSessionWorkspace[] = [];
-const EMPTY_AVAILABILITY = { workspaceKeys: [], projectKeys: [] } as const;
+const EMPTY_AVAILABILITY = { projectKeys: [] } as const;
 
 export function useSidebarSessionWorkspaces(input: {
   serverId: string | null;
@@ -108,10 +108,7 @@ export function useVisibleSidebarSessionFilterProjects(input: {
       deriveSidebarSessionFilterProjects({
         projects: input.projects,
         availability,
-        workspaceNameByKey: new Map(
-          workspaces.map((workspace) => [workspace.workspaceKey, workspace.workspaceName]),
-        ),
       }),
-    [availability, input.projects, workspaces],
+    [availability, input.projects],
   );
 }
