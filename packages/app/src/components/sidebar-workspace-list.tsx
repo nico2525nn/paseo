@@ -7,6 +7,7 @@ import {
   StatusBar,
   ScrollView,
   type GestureResponderEvent,
+  type PressableProps,
   type PressableStateCallbackType,
   type ViewStyle,
 } from "react-native";
@@ -18,6 +19,7 @@ import {
   useState,
   useEffect,
   useRef,
+  type ComponentType,
   type ReactElement,
   type MutableRefObject,
   type Ref,
@@ -32,8 +34,6 @@ import { DiffStat } from "@/components/diff-stat";
 import {
   Archive,
   CircleAlert,
-  ChevronDown,
-  ChevronRight,
   Copy,
   ExternalLink,
   FolderPlus,
@@ -112,10 +112,8 @@ import {
 import { WorkspaceHoverCard } from "@/components/workspace-hover-card";
 import { GitHubIcon } from "@/components/icons/github-icon";
 import { isWeb as platformIsWeb, isNative as platformIsNative } from "@/constants/platform";
-import {
-  SidebarProjectIcon,
-  SidebarProjectRowVisual,
-} from "@/components/sidebar/sidebar-project-row-visual";
+import { SidebarProjectIcon } from "@/components/sidebar/sidebar-project-row-visual";
+import { SidebarProjectHeaderRow } from "@/components/sidebar/sidebar-collapsible-project-section";
 
 function toProjectIconDataUri(icon: { mimeType: string; data: string } | null): string | null {
   if (!icon) {
@@ -492,51 +490,6 @@ function StatusDotOverlay({
   return <View style={overlayStyle} />;
 }
 
-function ProjectLeadingVisual({
-  displayName,
-  iconDataUri,
-  workspace,
-  chevron = null,
-  showChevron = false,
-  isArchiving = false,
-}: {
-  displayName: string;
-  iconDataUri: string | null;
-  workspace: SidebarWorkspaceEntry | null;
-  chevron?: "expand" | "collapse" | null;
-  showChevron?: boolean;
-  isArchiving?: boolean;
-}) {
-  const activeWorkspace = workspace;
-  const shouldShowWorkspaceStatus =
-    activeWorkspace !== null && (isArchiving || activeWorkspace.statusBucket !== "done");
-  const shouldShowSyncedLoader = activeWorkspace
-    ? shouldRenderSyncedStatusLoader({ bucket: activeWorkspace.statusBucket })
-    : false;
-
-  if (showChevron && chevron !== null) {
-    return (
-      <View style={styles.projectLeadingVisualSlot}>
-        <ProjectInlineChevron chevron={chevron} />
-      </View>
-    );
-  }
-
-  if (!shouldShowWorkspaceStatus || !activeWorkspace) {
-    return <SidebarProjectIcon projectName={displayName} iconDataUri={iconDataUri} />;
-  }
-
-  return (
-    <ProjectLeadingVisualStatus
-      displayName={displayName}
-      iconDataUri={iconDataUri}
-      isArchiving={isArchiving}
-      shouldShowSyncedLoader={shouldShowSyncedLoader}
-      activeWorkspace={activeWorkspace}
-    />
-  );
-}
-
 function ProjectRowTrailingActions({
   project,
   displayName,
@@ -848,16 +801,6 @@ function ProjectLeadingVisualStatus({
       ) : null}
     </View>
   );
-}
-
-function ProjectInlineChevron({ chevron }: { chevron: "expand" | "collapse" | null }) {
-  if (chevron === null) {
-    return null;
-  }
-  if (chevron === "collapse") {
-    return <ChevronDown size={14} color="#9ca3af" />;
-  }
-  return <ChevronRight size={14} color="#9ca3af" />;
 }
 
 function NewWorktreeButton({
@@ -1203,37 +1146,27 @@ function ProjectHeaderRow({
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
 
-  const projectRowStyle = useCallback(
-    ({ pressed }: PressableStateCallbackType) => [
-      styles.projectRow,
-      isDragging && styles.projectRowDragging,
-      selected && styles.sidebarRowSelected,
-      isHovered && styles.projectRowHovered,
-      pressed && styles.projectRowPressed,
-    ],
-    [isDragging, selected, isHovered],
-  );
-  const projectLeadingVisual = useMemo(
-    () => (
-      <ProjectLeadingVisual
+  const showsWorkspaceStatus =
+    workspace !== null && (isArchiving || workspace.statusBucket !== "done");
+  const leadingVisualOverride = useMemo<ReactElement | null>(() => {
+    if (!showsWorkspaceStatus || !workspace) {
+      return null;
+    }
+    return (
+      <ProjectLeadingVisualStatus
         displayName={displayName}
         iconDataUri={iconDataUri}
-        workspace={workspace}
-        chevron={chevron}
-        showChevron={isHovered && chevron !== null}
         isArchiving={isArchiving}
+        shouldShowSyncedLoader={shouldRenderSyncedStatusLoader({
+          bucket: workspace.statusBucket,
+        })}
+        activeWorkspace={workspace}
       />
-    ),
-    [chevron, displayName, iconDataUri, isArchiving, isHovered, workspace],
-  );
+    );
+  }, [displayName, iconDataUri, isArchiving, showsWorkspaceStatus, workspace]);
 
-  const rowChildren = (
+  const trailingSlot = (
     <>
-      <SidebarProjectRowVisual
-        projectName={displayName}
-        iconDataUri={iconDataUri}
-        leadingVisual={projectLeadingVisual}
-      />
       <ProjectRowTrailingActions
         project={project}
         displayName={displayName}
@@ -1253,29 +1186,9 @@ function ProjectHeaderRow({
     </>
   );
 
-  if (menuController) {
-    return (
-      <View
-        {...dragHandleProps?.attributes}
-        {...dragHandleProps?.listeners}
-        ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
-        onPointerEnter={handlePointerEnter}
-        onPointerLeave={handlePointerLeave}
-      >
-        <ContextMenuTrigger
-          enabledOnMobile={false}
-          style={projectRowStyle}
-          onPressIn={interaction.handlePressIn}
-          onTouchMove={interaction.handleTouchMove}
-          onPressOut={interaction.handlePressOut}
-          onPress={handlePress}
-          testID={`sidebar-project-row-${project.projectKey}`}
-        >
-          {rowChildren}
-        </ContextMenuTrigger>
-      </View>
-    );
-  }
+  const PressableComponent = menuController
+    ? (ProjectHeaderContextMenuTrigger as unknown as ComponentType<PressableProps>)
+    : undefined;
 
   return (
     <View
@@ -1285,19 +1198,29 @@ function ProjectHeaderRow({
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
     >
-      <Pressable
-        style={projectRowStyle}
+      <SidebarProjectHeaderRow
+        projectName={displayName}
+        iconDataUri={iconDataUri}
+        chevron={chevron}
+        isHovered={isHovered}
+        isDragging={isDragging}
+        selected={selected}
+        leadingVisualOverride={leadingVisualOverride}
+        trailingSlot={trailingSlot}
+        onPress={handlePress}
         onPressIn={interaction.handlePressIn}
         onTouchMove={interaction.handleTouchMove}
         onPressOut={interaction.handlePressOut}
-        onPress={handlePress}
         testID={`sidebar-project-row-${project.projectKey}`}
-      >
-        {rowChildren}
-      </Pressable>
+        PressableComponent={PressableComponent}
+      />
     </View>
   );
 }
+
+const ProjectHeaderContextMenuTrigger = (props: PressableProps): ReactElement => (
+  <ContextMenuTrigger enabledOnMobile={false} {...(props as object)} />
+);
 
 function WorkspaceRowInner({
   workspace,

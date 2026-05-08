@@ -18,6 +18,7 @@ export interface SidebarSessionGroup {
   visibleIds: readonly string[];
   hiddenCount: number;
   isExpanded: boolean;
+  isCollapsed: boolean;
   totalCount: number;
 }
 
@@ -148,10 +149,13 @@ export function deriveSidebarSessionFilterProjects(input: {
 
 export function deriveGroupedSidebarSessions(input: {
   agentsWithProjects: readonly SidebarSessionAgentProject[];
-  expandedProjects: ReadonlySet<string>;
+  previewExpandedProjects?: ReadonlySet<string>;
+  collapsedProjectKeys?: ReadonlySet<string>;
   limit?: number;
 }): readonly SidebarSessionGroup[] {
   const limit = input.limit ?? DEFAULT_GROUPED_SESSION_LIMIT;
+  const previewExpandedProjects = input.previewExpandedProjects ?? EMPTY_KEY_SET;
+  const collapsedProjectKeys = input.collapsedProjectKeys ?? EMPTY_KEY_SET;
   const groupsByProject = new Map<string, SidebarSessionGroupDraft>();
 
   for (const agent of input.agentsWithProjects) {
@@ -169,16 +173,46 @@ export function deriveGroupedSidebarSessions(input: {
   }
 
   return Array.from(groupsByProject.values(), (group) => {
-    const isExpanded = input.expandedProjects.has(group.projectKey);
-    const visibleIds = isExpanded ? group.ids : group.ids.slice(0, limit);
+    const isCollapsed = collapsedProjectKeys.has(group.projectKey);
+    const isExpanded = !isCollapsed && previewExpandedProjects.has(group.projectKey);
     return {
       projectKey: group.projectKey,
       projectName: group.projectName,
       projectIconKey: group.projectIconKey,
-      visibleIds,
-      hiddenCount: isExpanded ? 0 : Math.max(0, group.ids.length - limit),
+      visibleIds: visibleIdsFor({ ids: group.ids, isCollapsed, isExpanded, limit }),
+      hiddenCount: hiddenCountFor({ totalCount: group.ids.length, isCollapsed, isExpanded, limit }),
       isExpanded,
+      isCollapsed,
       totalCount: group.ids.length,
     };
   });
 }
+
+function visibleIdsFor(input: {
+  ids: readonly string[];
+  isCollapsed: boolean;
+  isExpanded: boolean;
+  limit: number;
+}): readonly string[] {
+  if (input.isCollapsed) {
+    return [];
+  }
+  if (input.isExpanded) {
+    return input.ids;
+  }
+  return input.ids.slice(0, input.limit);
+}
+
+function hiddenCountFor(input: {
+  totalCount: number;
+  isCollapsed: boolean;
+  isExpanded: boolean;
+  limit: number;
+}): number {
+  if (input.isCollapsed || input.isExpanded) {
+    return 0;
+  }
+  return Math.max(0, input.totalCount - input.limit);
+}
+
+const EMPTY_KEY_SET: ReadonlySet<string> = new Set();

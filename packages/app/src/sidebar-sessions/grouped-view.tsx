@@ -1,9 +1,9 @@
-import React, { memo, useCallback, useMemo, type ReactElement } from "react";
+import React, { memo, useCallback, useMemo, useState, type ReactElement } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { shallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
-import { SidebarProjectRowVisual } from "@/components/sidebar/sidebar-project-row-visual";
+import { SidebarProjectHeaderRow } from "@/components/sidebar/sidebar-collapsible-project-section";
 import { useProjectIconQuery } from "@/hooks/use-project-icon-query";
 import { useSessionStore } from "@/stores/session-store";
 import {
@@ -18,7 +18,13 @@ const GROUPED_SESSION_LIMIT = 6;
 type SessionStoreState = ReturnType<typeof useSessionStore.getState>;
 
 export type SidebarSessionListItem =
-  | { kind: "header"; projectKey: string; projectName: string; projectIconKey: string | null }
+  | {
+      kind: "header";
+      projectKey: string;
+      projectName: string;
+      projectIconKey: string | null;
+      isCollapsed: boolean;
+    }
   | { kind: "row"; id: string; serverId: string }
   | { kind: "footer"; projectKey: string; hiddenCount: number; isExpanded: boolean };
 
@@ -82,17 +88,19 @@ export function useOrderedAgentProjectShape(input: {
 
 export function useGroupedSidebarSessionListData(input: {
   agentsWithProjects: readonly SidebarSessionAgentProject[];
-  expandedProjects: ReadonlySet<string>;
+  previewExpandedProjects: ReadonlySet<string>;
+  collapsedProjectKeys: ReadonlySet<string>;
   serverId: string | null;
 }): readonly SidebarSessionListItem[] {
   const groupedSessions = useMemo(
     () =>
       deriveGroupedSidebarSessions({
         agentsWithProjects: input.agentsWithProjects,
-        expandedProjects: input.expandedProjects,
+        previewExpandedProjects: input.previewExpandedProjects,
+        collapsedProjectKeys: input.collapsedProjectKeys,
         limit: GROUPED_SESSION_LIMIT,
       }),
-    [input.agentsWithProjects, input.expandedProjects],
+    [input.agentsWithProjects, input.collapsedProjectKeys, input.previewExpandedProjects],
   );
 
   return useMemo(
@@ -101,7 +109,7 @@ export function useGroupedSidebarSessionListData(input: {
   );
 }
 
-function flattenGroupedSidebarSessions(
+export function flattenGroupedSidebarSessions(
   groupedSessions: readonly SidebarSessionGroup[],
   serverId: string | null,
 ): readonly SidebarSessionListItem[] {
@@ -116,7 +124,11 @@ function flattenGroupedSidebarSessions(
       projectKey: group.projectKey,
       projectName: group.projectName,
       projectIconKey: group.projectIconKey,
+      isCollapsed: group.isCollapsed,
     });
+    if (group.isCollapsed) {
+      continue;
+    }
     for (const id of group.visibleIds) {
       items.push({ kind: "row", id, serverId });
     }
@@ -134,12 +146,18 @@ function flattenGroupedSidebarSessions(
 
 export const SidebarSessionGroupHeader = memo(function SidebarSessionGroupHeader({
   serverId,
+  projectKey,
   projectName,
   projectIconKey,
+  isCollapsed,
+  onToggleCollapsed,
 }: {
   serverId: string | null;
+  projectKey: string;
   projectName: string;
   projectIconKey: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: (projectKey: string) => void;
 }): ReactElement {
   const { icon } = useProjectIconQuery({ serverId: serverId ?? "", cwd: projectIconKey ?? "" });
   const dataUri = useMemo(() => {
@@ -149,9 +167,24 @@ export const SidebarSessionGroupHeader = memo(function SidebarSessionGroupHeader
     return `data:${icon.mimeType};base64,${icon.data}`;
   }, [icon]);
 
+  const [isHovered, setIsHovered] = useState(false);
+  const handlePointerEnter = useCallback(() => setIsHovered(true), []);
+  const handlePointerLeave = useCallback(() => setIsHovered(false), []);
+  const handlePress = useCallback(() => {
+    onToggleCollapsed(projectKey);
+  }, [onToggleCollapsed, projectKey]);
+
   return (
-    <View style={styles.projectRow}>
-      <SidebarProjectRowVisual projectName={projectName} iconDataUri={dataUri} />
+    <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
+      <SidebarProjectHeaderRow
+        projectName={projectName}
+        iconDataUri={dataUri}
+        chevron={isCollapsed ? "expand" : "collapse"}
+        isHovered={isHovered}
+        onPress={handlePress}
+        testID={`sidebar-session-group-header-${projectKey}`}
+        accessibilityLabel={isCollapsed ? `Expand ${projectName}` : `Collapse ${projectName}`}
+      />
     </View>
   );
 });
@@ -176,47 +209,31 @@ export const SidebarSessionGroupFooter = memo(function SidebarSessionGroupFooter
       accessibilityRole="button"
       accessibilityLabel={isExpanded ? "Show less sessions" : `Show ${hiddenCount} more sessions`}
       onPress={handlePress}
-      style={styles.footerRow}
+      style={footerRowStyle}
       testID={`sidebar-session-group-footer-${projectKey}`}
     >
-      <View style={styles.footerIconColumn} />
       <Text style={styles.footerText}>{isExpanded ? "Show less" : `Show ${hiddenCount} more`}</Text>
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create((theme) => ({
-  projectRow: {
-    minHeight: 36,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    marginBottom: theme.spacing[1],
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: theme.spacing[2],
-    userSelect: "none",
-  },
   footerRow: {
-    minHeight: 36,
+    minHeight: 32,
     flexDirection: "row",
     alignItems: "center",
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    paddingLeft: theme.spacing[3] + theme.spacing[3],
+    paddingRight: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     marginBottom: theme.spacing[1],
-  },
-  footerIconColumn: {
-    width: theme.iconSize.md,
-    height: theme.iconSize.md,
-    flexShrink: 0,
   },
   footerText: {
     flex: 1,
     minWidth: 0,
-    fontSize: theme.fontSize.sm,
+    fontSize: theme.fontSize.xs,
     color: theme.colors.foregroundMuted,
   },
 }));
+
+const footerRowStyle = styles.footerRow;

@@ -10,7 +10,7 @@ describe("useSidebarSessionsController", () => {
     const { result } = renderHook(() => useSidebarSessionsController({ serverId: "server-1" }));
 
     expect(result.current.groupByProject).toBe(false);
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("enables project grouping without expanding projects", () => {
@@ -21,40 +21,40 @@ describe("useSidebarSessionsController", () => {
     });
 
     expect(result.current.groupByProject).toBe(true);
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("toggles one expanded project", () => {
     const { result } = renderHook(() => useSidebarSessionsController({ serverId: "server-1" }));
 
     act(() => {
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect(result.current.expandedProjects.has("p1")).toBe(true);
+    expect(result.current.previewExpandedProjects.has("p1")).toBe(true);
 
     act(() => {
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("toggles expanded projects independently", () => {
     const { result } = renderHook(() => useSidebarSessionsController({ serverId: "server-1" }));
 
     act(() => {
-      result.current.toggleProjectExpanded("p1");
-      result.current.toggleProjectExpanded("p2");
+      result.current.toggleProjectPreviewExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p2");
     });
 
-    expect([...result.current.expandedProjects].sort()).toEqual(["p1", "p2"]);
+    expect([...result.current.previewExpandedProjects].sort()).toEqual(["p1", "p2"]);
 
     act(() => {
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect([...result.current.expandedProjects]).toEqual(["p2"]);
+    expect([...result.current.previewExpandedProjects]).toEqual(["p2"]);
   });
 
   it("clears expanded projects when project grouping is disabled", () => {
@@ -62,17 +62,17 @@ describe("useSidebarSessionsController", () => {
 
     act(() => {
       result.current.setGroupByProject(true);
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect(result.current.expandedProjects.has("p1")).toBe(true);
+    expect(result.current.previewExpandedProjects.has("p1")).toBe(true);
 
     act(() => {
       result.current.setGroupByProject(false);
     });
 
     expect(result.current.groupByProject).toBe(false);
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("resets the session filter when the active host changes", () => {
@@ -107,14 +107,14 @@ describe("useSidebarSessionsController", () => {
 
     act(() => {
       result.current.setGroupByProject(true);
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect(result.current.expandedProjects.has("p1")).toBe(true);
+    expect(result.current.previewExpandedProjects.has("p1")).toBe(true);
 
     rerender({ serverId: "server-2" });
 
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("clears expanded projects when the session filter changes", () => {
@@ -122,10 +122,10 @@ describe("useSidebarSessionsController", () => {
 
     act(() => {
       result.current.setGroupByProject(true);
-      result.current.toggleProjectExpanded("p1");
+      result.current.toggleProjectPreviewExpanded("p1");
     });
 
-    expect(result.current.expandedProjects.has("p1")).toBe(true);
+    expect(result.current.previewExpandedProjects.has("p1")).toBe(true);
 
     act(() => {
       result.current.setSidebarSessionFilter({
@@ -138,7 +138,7 @@ describe("useSidebarSessionsController", () => {
       type: "project",
       projectKey: "project-a",
     });
-    expect(result.current.expandedProjects.size).toBe(0);
+    expect(result.current.previewExpandedProjects.size).toBe(0);
   });
 
   it("does not clear the session filter when project grouping is enabled", () => {

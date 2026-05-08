@@ -47,6 +47,7 @@ const {
     fontSize: { sm: 14, xs: 12 },
     fontWeight: { medium: "500" },
     iconSize: { md: 20, sm: 16 },
+    shadow: { md: {} },
     spacing: { 1: 4, 2: 8, 3: 12, 4: 16, 6: 24 },
   },
 }));
@@ -66,6 +67,15 @@ vi.mock("@/components/provider-icons", async () => {
       function ProviderIcon() {
         return ReactModule.createElement("span", { "data-testid": "provider-icon" });
       },
+  };
+});
+
+vi.mock("lucide-react-native", () => {
+  const createIcon = (name: string) => (props: Record<string, unknown>) =>
+    React.createElement("span", { ...props, "data-icon": name });
+  return {
+    ChevronDown: createIcon("ChevronDown"),
+    ChevronRight: createIcon("ChevronRight"),
   };
 });
 
@@ -254,8 +264,10 @@ describe("SidebarSessionsView row navigation", () => {
         projects={projects()}
         filter={ALL_SESSIONS_FILTER}
         groupByProject={false}
-        expandedProjects={new Set()}
-        onProjectExpandedToggle={vi.fn()}
+        previewExpandedProjects={new Set()}
+        collapsedProjectKeys={new Set()}
+        onProjectPreviewExpandedToggle={vi.fn()}
+        onProjectCollapsedToggle={vi.fn()}
       />,
     );
 
@@ -284,8 +296,10 @@ describe("SidebarSessionsView row navigation", () => {
         projects={projects()}
         filter={ALL_SESSIONS_FILTER}
         groupByProject={false}
-        expandedProjects={new Set()}
-        onProjectExpandedToggle={vi.fn()}
+        previewExpandedProjects={new Set()}
+        collapsedProjectKeys={new Set()}
+        onProjectPreviewExpandedToggle={vi.fn()}
+        onProjectCollapsedToggle={vi.fn()}
       />,
     );
     useSessionStore.getState().setWorkspaces(SERVER_ID, new Map());

@@ -8,22 +8,24 @@ export function useSidebarSessionsController({ serverId }: { serverId: string | 
     type: "all",
   });
   const [groupByProject, setGroupByProjectState] = useState(false);
-  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(() => new Set());
+  const [previewExpandedProjects, setPreviewExpandedProjects] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const setGroupByProject = useCallback((next: boolean) => {
     setGroupByProjectState(next);
     if (!next) {
-      setExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
+      setPreviewExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
     }
   }, []);
 
   const setSidebarSessionFilterWithReset = useCallback((next: SidebarSessionFilter) => {
     setSidebarSessionFilter(next);
-    setExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
+    setPreviewExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
   }, []);
 
-  const toggleProjectExpanded = useCallback((projectKey: string) => {
-    setExpandedProjects((previous) => {
+  const toggleProjectPreviewExpanded = useCallback((projectKey: string) => {
+    setPreviewExpandedProjects((previous) => {
       const next = new Set(previous);
       if (next.has(projectKey)) {
         next.delete(projectKey);
@@ -40,7 +42,7 @@ export function useSidebarSessionsController({ serverId }: { serverId: string | 
     }
     previousServerIdRef.current = serverId;
     setSidebarSessionFilter({ type: "all" });
-    setExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
+    setPreviewExpandedProjects((previous) => (previous.size === 0 ? previous : new Set()));
   }, [serverId]);
 
   return {
@@ -49,8 +51,8 @@ export function useSidebarSessionsController({ serverId }: { serverId: string | 
     sidebarSessionFilter,
     setSidebarSessionFilter: setSidebarSessionFilterWithReset,
     groupByProject,
-    expandedProjects,
+    previewExpandedProjects,
     setGroupByProject,
-    toggleProjectExpanded,
+    toggleProjectPreviewExpanded,
   };
 }

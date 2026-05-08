@@ -10,6 +10,7 @@ import {
 import { useShallow } from "zustand/shallow";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
+import { sidebarProjectChildIndentStyles } from "@/components/sidebar/sidebar-collapsible-project-section";
 import {
   type AggregatedAgentIdEntry,
   useAggregatedAgentIds,
@@ -46,8 +47,10 @@ interface SidebarSessionsViewProps {
   projects: readonly SidebarProjectEntry[];
   filter: SidebarSessionFilter;
   groupByProject: boolean;
-  expandedProjects: ReadonlySet<string>;
-  onProjectExpandedToggle: (projectKey: string) => void;
+  previewExpandedProjects: ReadonlySet<string>;
+  collapsedProjectKeys: ReadonlySet<string>;
+  onProjectPreviewExpandedToggle: (projectKey: string) => void;
+  onProjectCollapsedToggle: (projectKey: string) => void;
 }
 
 export function SidebarSessionsView({
@@ -55,8 +58,10 @@ export function SidebarSessionsView({
   projects,
   filter,
   groupByProject,
-  expandedProjects,
-  onProjectExpandedToggle,
+  previewExpandedProjects,
+  collapsedProjectKeys,
+  onProjectPreviewExpandedToggle,
+  onProjectCollapsedToggle,
 }: SidebarSessionsViewProps): ReactElement {
   const isInitialLoad = useAggregatedAgentsInitialLoad();
   const workspaces = useSidebarSessionWorkspaces({ serverId, projects });
@@ -107,8 +112,10 @@ export function SidebarSessionsView({
         serverId={serverId}
         sessionIds={sessionIds}
         resolveCwdToProject={resolveCwdToProject}
-        expandedProjects={expandedProjects}
-        onProjectExpandedToggle={onProjectExpandedToggle}
+        previewExpandedProjects={previewExpandedProjects}
+        collapsedProjectKeys={collapsedProjectKeys}
+        onProjectPreviewExpandedToggle={onProjectPreviewExpandedToggle}
+        onProjectCollapsedToggle={onProjectCollapsedToggle}
       />
     );
   }
@@ -147,14 +154,18 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
   serverId,
   sessionIds,
   resolveCwdToProject,
-  expandedProjects,
-  onProjectExpandedToggle,
+  previewExpandedProjects,
+  collapsedProjectKeys,
+  onProjectPreviewExpandedToggle,
+  onProjectCollapsedToggle,
 }: {
   serverId: string | null;
   sessionIds: readonly string[];
   resolveCwdToProject: (cwd: string) => ResolvedSidebarSessionProject | null;
-  expandedProjects: ReadonlySet<string>;
-  onProjectExpandedToggle: (projectKey: string) => void;
+  previewExpandedProjects: ReadonlySet<string>;
+  collapsedProjectKeys: ReadonlySet<string>;
+  onProjectPreviewExpandedToggle: (projectKey: string) => void;
+  onProjectCollapsedToggle: (projectKey: string) => void;
 }): ReactElement {
   const agentsWithProjects = useOrderedAgentProjectShape({
     orderedIds: sessionIds,
@@ -163,7 +174,8 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
   });
   const data = useGroupedSidebarSessionListData({
     agentsWithProjects,
-    expandedProjects,
+    previewExpandedProjects,
+    collapsedProjectKeys,
     serverId,
   });
 
@@ -174,24 +186,27 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
           return (
             <SidebarSessionGroupHeader
               serverId={serverId}
+              projectKey={item.projectKey}
               projectName={item.projectName}
               projectIconKey={item.projectIconKey}
+              isCollapsed={item.isCollapsed}
+              onToggleCollapsed={onProjectCollapsedToggle}
             />
           );
         case "row":
-          return <SidebarSessionRow id={item.id} serverId={item.serverId} />;
+          return <SidebarSessionRow id={item.id} serverId={item.serverId} indented />;
         case "footer":
           return (
             <SidebarSessionGroupFooter
               projectKey={item.projectKey}
               hiddenCount={item.hiddenCount}
               isExpanded={item.isExpanded}
-              onPress={onProjectExpandedToggle}
+              onPress={onProjectPreviewExpandedToggle}
             />
           );
       }
     },
-    [onProjectExpandedToggle, serverId],
+    [onProjectCollapsedToggle, onProjectPreviewExpandedToggle, serverId],
   );
   const keyExtractor = useCallback((item: SidebarSessionListItem) => {
     switch (item.kind) {
@@ -221,9 +236,11 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
 const SidebarSessionRow = memo(function SidebarSessionRow({
   id,
   serverId,
+  indented = false,
 }: {
   id: string;
   serverId: string;
+  indented?: boolean;
 }): ReactElement | null {
   const { theme } = useUnistyles();
   const [isHovered, setIsHovered] = useState(false);
@@ -269,10 +286,11 @@ const SidebarSessionRow = memo(function SidebarSessionRow({
   const pressableStyle = useCallback(
     ({ pressed }: PressableStateCallbackType) => [
       styles.row,
+      indented && sidebarProjectChildIndentStyles.childRow,
       isHovered && styles.rowHovered,
       pressed && styles.rowPressed,
     ],
-    [isHovered],
+    [indented, isHovered],
   );
 
   const titleStyle = useMemo(() => [styles.title, isHovered && styles.titleHovered], [isHovered]);

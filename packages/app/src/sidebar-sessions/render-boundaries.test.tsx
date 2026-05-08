@@ -24,6 +24,15 @@ vi.mock("@/hooks/use-project-icon-query", () => ({
   useProjectIconQuery: () => ({ icon: null, isLoading: false, isError: false }),
 }));
 
+vi.mock("lucide-react-native", () => {
+  const createIcon = (name: string) => (props: Record<string, unknown>) =>
+    React.createElement("span", { ...props, "data-icon": name });
+  return {
+    ChevronDown: createIcon("ChevronDown"),
+    ChevronRight: createIcon("ChevronRight"),
+  };
+});
+
 const TIMESTAMP = new Date("2026-05-08T10:00:00.000Z");
 const SERVER_ID = "server-1";
 
@@ -37,10 +46,13 @@ vi.mock("react-native-unistyles", () => ({
               border: "#dddddd",
               foreground: "#111111",
               foregroundMuted: "#666666",
+              surface2: "#eeeeee",
+              surfaceSidebarHover: "#f5f5f5",
             },
-            fontSize: { sm: 14 },
+            fontSize: { sm: 14, xs: 12 },
             iconSize: { md: 20 },
-            spacing: { 1: 4, 2: 8 },
+            shadow: { md: {} },
+            spacing: { 1: 4, 2: 8, 3: 12 },
           })
         : styles,
   },
@@ -98,7 +110,7 @@ function seedAgents(agents: Agent[]) {
     .setAgents(SERVER_ID, new Map(agents.map((agent) => [agent.id, agent])));
 }
 
-function useGroupedBoundaryHarness() {
+function useGroupedBoundaryHarness(input?: { collapsedProjectKeys?: ReadonlySet<string> }) {
   const orderedIds = useStoreWithEqualityFn(
     useSessionStore,
     (state) => Array.from(state.sessions[SERVER_ID]?.agents?.keys() ?? []),
@@ -115,11 +127,14 @@ function useGroupedBoundaryHarness() {
     serverId: SERVER_ID,
     resolveCwdToProject,
   });
-  const expandedProjects = useMemo(() => new Set<string>(), []);
+  const previewExpandedProjects = useMemo(() => new Set<string>(), []);
+  const fallbackCollapsed = useMemo(() => new Set<string>(), []);
+  const collapsedProjectKeys = input?.collapsedProjectKeys ?? fallbackCollapsed;
 
   return useGroupedSidebarSessionListData({
     agentsWithProjects,
-    expandedProjects,
+    previewExpandedProjects,
+    collapsedProjectKeys,
     serverId: SERVER_ID,
   });
 }
@@ -234,6 +249,25 @@ describe("sidebar session render boundaries", () => {
     });
 
     expect(result.current).toBe(beforeData);
+  });
+
+  it("emits header only (no rows or footer) for a collapsed project", () => {
+    const overLimit = Array.from({ length: 10 }, (_, index) =>
+      makeAgent({ id: `agent-${index + 1}`, cwd: "/repo/a" }),
+    );
+    seedAgents(overLimit);
+
+    const { result } = renderHook(() =>
+      useGroupedBoundaryHarness({ collapsedProjectKeys: new Set(["project-a"]) }),
+    );
+
+    expect(result.current).toEqual([
+      expect.objectContaining({
+        kind: "header",
+        projectKey: "project-a",
+        isCollapsed: true,
+      }),
+    ]);
   });
 
   it("calls the grouped footer press handler with its project key", () => {

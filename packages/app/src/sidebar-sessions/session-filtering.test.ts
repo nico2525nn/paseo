@@ -219,7 +219,7 @@ describe("deriveGroupedSidebarSessions", () => {
     expect(
       deriveGroupedSidebarSessions({
         agentsWithProjects: [],
-        expandedProjects: new Set(),
+        previewExpandedProjects: new Set(),
       }),
     ).toEqual([]);
   });
@@ -227,7 +227,7 @@ describe("deriveGroupedSidebarSessions", () => {
   it("keeps a single project under the limit fully visible and collapsed", () => {
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(["a1", "a2", "a3"], testProject("project-a")),
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
       limit: 6,
     });
 
@@ -239,6 +239,7 @@ describe("deriveGroupedSidebarSessions", () => {
         visibleIds: ["a1", "a2", "a3"],
         hiddenCount: 0,
         isExpanded: false,
+        isCollapsed: false,
         totalCount: 3,
       },
     ]);
@@ -249,7 +250,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
       limit: 6,
     });
 
@@ -257,6 +258,7 @@ describe("deriveGroupedSidebarSessions", () => {
       visibleIds: ["a1", "a2", "a3", "a4", "a5", "a6"],
       hiddenCount: 4,
       isExpanded: false,
+      isCollapsed: false,
       totalCount: 10,
     });
   });
@@ -266,7 +268,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
-      expandedProjects: new Set(["project-a"]),
+      previewExpandedProjects: new Set(["project-a"]),
       limit: 6,
     });
 
@@ -274,7 +276,42 @@ describe("deriveGroupedSidebarSessions", () => {
       visibleIds: orderedIds,
       hiddenCount: 0,
       isExpanded: true,
+      isCollapsed: false,
       totalCount: 10,
+    });
+  });
+
+  it("hides all rows when a project is collapsed", () => {
+    const orderedIds = Array.from({ length: 10 }, (_, index) => `a${index + 1}`);
+    const groups = deriveGroupedSidebarSessions({
+      agentsWithProjects: agentProjects(orderedIds, testProject("project-a")),
+      previewExpandedProjects: new Set(),
+      collapsedProjectKeys: new Set(["project-a"]),
+      limit: 6,
+    });
+
+    expect(groups[0]).toMatchObject({
+      visibleIds: [],
+      hiddenCount: 0,
+      isExpanded: false,
+      isCollapsed: true,
+      totalCount: 10,
+    });
+  });
+
+  it("collapsed wins over preview-expanded", () => {
+    const orderedIds = Array.from({ length: 10 }, (_, index) => `a${index + 1}`);
+    const groups = deriveGroupedSidebarSessions({
+      agentsWithProjects: agentProjects(orderedIds, testProject("project-a")),
+      previewExpandedProjects: new Set(["project-a"]),
+      collapsedProjectKeys: new Set(["project-a"]),
+      limit: 6,
+    });
+
+    expect(groups[0]).toMatchObject({
+      visibleIds: [],
+      isExpanded: false,
+      isCollapsed: true,
     });
   });
 
@@ -285,7 +322,7 @@ describe("deriveGroupedSidebarSessions", () => {
         agentProject("b1", testProject("project-b")),
         agentProject("a2", testProject("project-a")),
       ],
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
     });
 
     expect(groups.map((group) => group.projectKey)).toEqual(["project-a", "project-b"]);
@@ -294,7 +331,7 @@ describe("deriveGroupedSidebarSessions", () => {
   it("preserves order within each project", () => {
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(["a1", "a2", "a3"], testProject("project-a")),
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
     });
 
     expect(groups[0]?.visibleIds).toEqual(["a1", "a2", "a3"]);
@@ -307,7 +344,7 @@ describe("deriveGroupedSidebarSessions", () => {
         agentProject("b1", testProject("project-b")),
         agentProject("a2", testProject("project-a")),
       ],
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
     });
 
     expect(groups.map((group) => ({ key: group.projectKey, ids: group.visibleIds }))).toEqual([
@@ -321,7 +358,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
     });
 
     expect(groups[0]?.visibleIds).toHaveLength(6);
@@ -331,7 +368,7 @@ describe("deriveGroupedSidebarSessions", () => {
   it("honors a custom collapsed limit", () => {
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(["a1", "a2", "a3", "a4"], testProject("project-a")),
-      expandedProjects: new Set(),
+      previewExpandedProjects: new Set(),
       limit: 2,
     });
 

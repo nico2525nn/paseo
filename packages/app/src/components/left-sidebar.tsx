@@ -91,9 +91,9 @@ interface SidebarSharedProps {
   sidebarSessionFilter: SidebarSessionFilter;
   setSidebarSessionFilter: (filter: SidebarSessionFilter) => void;
   groupByProject: boolean;
-  expandedProjects: ReadonlySet<string>;
+  previewExpandedProjects: ReadonlySet<string>;
   setGroupByProject: (next: boolean) => void;
-  toggleProjectExpanded: (projectKey: string) => void;
+  toggleProjectPreviewExpanded: (projectKey: string) => void;
   hostOptions: ComboboxOption[];
   hostTriggerRef: RefObject<View | null>;
   isHostPickerOpen: boolean;
@@ -202,9 +202,9 @@ export const LeftSidebar = memo(function LeftSidebar({
     sidebarSessionFilter,
     setSidebarSessionFilter,
     groupByProject,
-    expandedProjects,
+    previewExpandedProjects,
     setGroupByProject,
-    toggleProjectExpanded,
+    toggleProjectPreviewExpanded,
   } = useSidebarSessionsController({ serverId: activeServerId });
 
   const { projects, isInitialLoad, isRevalidating, refreshAll } = useSidebarWorkspacesList({
@@ -276,9 +276,9 @@ export const LeftSidebar = memo(function LeftSidebar({
     sidebarSessionFilter,
     setSidebarSessionFilter,
     groupByProject,
-    expandedProjects,
+    previewExpandedProjects,
     setGroupByProject,
-    toggleProjectExpanded,
+    toggleProjectPreviewExpanded,
     hostOptions,
     hostTriggerRef,
     isHostPickerOpen,
@@ -522,9 +522,9 @@ function MobileSidebar({
   sidebarSessionFilter,
   setSidebarSessionFilter,
   groupByProject,
-  expandedProjects,
+  previewExpandedProjects,
   setGroupByProject,
-  toggleProjectExpanded,
+  toggleProjectPreviewExpanded,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -758,8 +758,10 @@ function MobileSidebar({
                 projects={projects}
                 filter={sidebarSessionFilter}
                 groupByProject={groupByProject}
-                expandedProjects={expandedProjects}
-                onProjectExpandedToggle={toggleProjectExpanded}
+                previewExpandedProjects={previewExpandedProjects}
+                collapsedProjectKeys={collapsedProjectKeys}
+                onProjectPreviewExpandedToggle={toggleProjectPreviewExpanded}
+                onProjectCollapsedToggle={toggleProjectCollapsed}
               />
             )}
 
@@ -794,9 +796,9 @@ function DesktopSidebar({
   sidebarSessionFilter,
   setSidebarSessionFilter,
   groupByProject,
-  expandedProjects,
+  previewExpandedProjects,
   setGroupByProject,
-  toggleProjectExpanded,
+  toggleProjectPreviewExpanded,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -929,8 +931,10 @@ function DesktopSidebar({
             projects={projects}
             filter={sidebarSessionFilter}
             groupByProject={groupByProject}
-            expandedProjects={expandedProjects}
-            onProjectExpandedToggle={toggleProjectExpanded}
+            previewExpandedProjects={previewExpandedProjects}
+            collapsedProjectKeys={collapsedProjectKeys}
+            onProjectPreviewExpandedToggle={toggleProjectPreviewExpanded}
+            onProjectCollapsedToggle={toggleProjectCollapsed}
           />
         )}
 
