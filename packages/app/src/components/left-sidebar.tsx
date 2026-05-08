@@ -1,5 +1,5 @@
 import { router, usePathname } from "expo-router";
-import { FolderPlus, MessagesSquare, Settings } from "lucide-react-native";
+import { FolderPlus, Settings } from "lucide-react-native";
 import {
   type Dispatch,
   memo,
@@ -32,8 +32,9 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
-import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
+import { SidebarHistoryNavigationRow } from "@/components/sidebar/sidebar-history-navigation-row";
+import { SidebarShellHeader } from "@/components/sidebar/sidebar-shell-header";
+import { SidebarWorkspacesView } from "@/components/sidebar/sidebar-workspaces-view";
 import { Combobox, ComboboxItem, type ComboboxOption } from "@/components/ui/combobox";
 import { Shortcut } from "@/components/ui/shortcut";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -62,9 +63,14 @@ import {
   buildSettingsRoute,
   mapPathnameToServer,
 } from "@/utils/host-routes";
-import { SidebarAgentListSkeleton } from "./sidebar-agent-list-skeleton";
+import {
+  SidebarSessionsToggle,
+  SidebarSessionsView,
+  type SidebarSessionFilter,
+  type SidebarSessionViewMode,
+  useSidebarSessionsController,
+} from "@/sidebar-sessions";
 import { SidebarCalloutSlot } from "./sidebar-callout-slot";
-import { SidebarWorkspaceList } from "./sidebar-workspace-list";
 
 const MIN_CHAT_WIDTH = 400;
 
@@ -80,6 +86,10 @@ interface SidebarSharedProps {
   activeServerId: string | null;
   activeHostLabel: string;
   activeHostStatusColor: string;
+  sidebarViewMode: SidebarSessionViewMode;
+  setSidebarViewMode: (mode: SidebarSessionViewMode) => void;
+  sidebarSessionFilter: SidebarSessionFilter;
+  setSidebarSessionFilter: (filter: SidebarSessionFilter) => void;
   hostOptions: ComboboxOption[];
   hostTriggerRef: RefObject<View | null>;
   isHostPickerOpen: boolean;
@@ -182,6 +192,8 @@ export const LeftSidebar = memo(function LeftSidebar({
   );
   const hostTriggerRef = useRef<View | null>(null);
   const [isHostPickerOpen, setIsHostPickerOpen] = useState(false);
+  const { sidebarViewMode, setSidebarViewMode, sidebarSessionFilter, setSidebarSessionFilter } =
+    useSidebarSessionsController({ serverId: activeServerId });
 
   const { projects, isInitialLoad, isRevalidating, refreshAll } = useSidebarWorkspacesList({
     serverId: activeServerId,
@@ -247,6 +259,10 @@ export const LeftSidebar = memo(function LeftSidebar({
     activeServerId,
     activeHostLabel,
     activeHostStatusColor,
+    sidebarViewMode,
+    setSidebarViewMode,
+    sidebarSessionFilter,
+    setSidebarSessionFilter,
     hostOptions,
     hostTriggerRef,
     isHostPickerOpen,
@@ -485,6 +501,10 @@ function MobileSidebar({
   activeServerId,
   activeHostLabel,
   activeHostStatusColor,
+  sidebarViewMode,
+  setSidebarViewMode,
+  sidebarSessionFilter,
+  setSidebarSessionFilter,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -507,8 +527,6 @@ function MobileSidebar({
   closeToAgent,
   handleViewMoreNavigate,
 }: MobileSidebarProps) {
-  const pathname = usePathname();
-  const isSessionsActive = pathname.includes("/sessions");
   const {
     translateX,
     backdropOpacity,
@@ -664,6 +682,26 @@ function MobileSidebar({
     ],
     [mobileSidebarInsetStyle, sidebarAnimatedStyle, theme.colors.surfaceSidebar],
   );
+  const toggleSlot = useMemo(
+    () => (
+      <SidebarSessionsToggle
+        serverId={activeServerId}
+        mode={sidebarViewMode}
+        filter={sidebarSessionFilter}
+        projects={projects}
+        onModeChange={setSidebarViewMode}
+        onFilterChange={setSidebarSessionFilter}
+      />
+    ),
+    [
+      activeServerId,
+      projects,
+      sidebarSessionFilter,
+      sidebarViewMode,
+      setSidebarSessionFilter,
+      setSidebarViewMode,
+    ],
+  );
 
   return (
     <View style={StyleSheet.absoluteFillObject} pointerEvents={overlayPointerEvents}>
@@ -672,28 +710,29 @@ function MobileSidebar({
       <GestureDetector gesture={closeGesture} touchAction="pan-y">
         <Animated.View style={mobileSidebarStyle} pointerEvents="auto">
           <View style={styles.sidebarContent} pointerEvents="auto">
-            <SidebarHeaderRow
-              icon={MessagesSquare}
-              label="Sessions"
-              onPress={handleViewMore}
-              isActive={isSessionsActive}
-              testID="sidebar-sessions"
-            />
+            <SidebarShellHeader toggleSlot={toggleSlot}>
+              <SidebarHistoryNavigationRow onPress={handleViewMore} />
+            </SidebarShellHeader>
 
-            {isInitialLoad ? (
-              <SidebarAgentListSkeleton />
-            ) : (
-              <SidebarWorkspaceList
+            {sidebarViewMode === "workspaces" ? (
+              <SidebarWorkspacesView
                 serverId={activeServerId}
                 collapsedProjectKeys={collapsedProjectKeys}
                 onToggleProjectCollapsed={toggleProjectCollapsed}
                 shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
                 projects={projects}
+                isInitialLoad={isInitialLoad}
                 isRefreshing={isManualRefresh && isRevalidating}
                 onRefresh={handleRefresh}
                 onWorkspacePress={handleWorkspacePress}
                 onAddProject={handleOpenProject}
                 parentGestureRef={closeGestureRef}
+              />
+            ) : (
+              <SidebarSessionsView
+                serverId={activeServerId}
+                projects={projects}
+                filter={sidebarSessionFilter}
               />
             )}
 
@@ -723,6 +762,10 @@ function DesktopSidebar({
   activeServerId,
   activeHostLabel,
   activeHostStatusColor,
+  sidebarViewMode,
+  setSidebarViewMode,
+  sidebarSessionFilter,
+  setSidebarSessionFilter,
   hostOptions,
   hostTriggerRef,
   isHostPickerOpen,
@@ -743,8 +786,6 @@ function DesktopSidebar({
   isOpen,
   handleViewMore,
 }: DesktopSidebarProps) {
-  const pathname = usePathname();
-  const isSessionsActive = pathname.includes("/sessions");
   const padding = useWindowControlsPadding("sidebar");
   const sidebarWidth = usePanelStore((state) => state.sidebarWidth);
   const setSidebarWidth = usePanelStore((state) => state.setSidebarWidth);
@@ -799,6 +840,26 @@ function DesktopSidebar({
     () => [styles.resizeHandle, isWeb && ({ cursor: "col-resize" } as object)],
     [],
   );
+  const toggleSlot = useMemo(
+    () => (
+      <SidebarSessionsToggle
+        serverId={activeServerId}
+        mode={sidebarViewMode}
+        filter={sidebarSessionFilter}
+        projects={projects}
+        onModeChange={setSidebarViewMode}
+        onFilterChange={setSidebarSessionFilter}
+      />
+    ),
+    [
+      activeServerId,
+      projects,
+      sidebarSessionFilter,
+      sidebarViewMode,
+      setSidebarSessionFilter,
+      setSidebarViewMode,
+    ],
+  );
 
   if (!isOpen) {
     return null;
@@ -807,30 +868,31 @@ function DesktopSidebar({
   return (
     <Animated.View style={desktopSidebarStyle}>
       <View style={desktopSidebarBorderStyle}>
-        <View style={styles.sidebarDragArea}>
-          <TitlebarDragRegion />
-          {padding.top > 0 ? <View style={paddingTopSpacerStyle} /> : null}
-          <SidebarHeaderRow
-            icon={MessagesSquare}
-            label="Sessions"
-            onPress={handleViewMore}
-            isActive={isSessionsActive}
-            testID="sidebar-sessions"
-          />
-        </View>
+        <SidebarShellHeader
+          topSpacerStyle={padding.top > 0 ? paddingTopSpacerStyle : undefined}
+          toggleSlot={toggleSlot}
+          withTitlebarDragRegion
+        >
+          <SidebarHistoryNavigationRow onPress={handleViewMore} />
+        </SidebarShellHeader>
 
-        {isInitialLoad ? (
-          <SidebarAgentListSkeleton />
-        ) : (
-          <SidebarWorkspaceList
+        {sidebarViewMode === "workspaces" ? (
+          <SidebarWorkspacesView
             serverId={activeServerId}
             collapsedProjectKeys={collapsedProjectKeys}
             onToggleProjectCollapsed={toggleProjectCollapsed}
             shortcutIndexByWorkspaceKey={shortcutIndexByWorkspaceKey}
             projects={projects}
+            isInitialLoad={isInitialLoad}
             isRefreshing={isManualRefresh && isRevalidating}
             onRefresh={handleRefresh}
             onAddProject={handleOpenProject}
+          />
+        ) : (
+          <SidebarSessionsView
+            serverId={activeServerId}
+            projects={projects}
+            filter={sidebarSessionFilter}
           />
         )}
 
@@ -897,9 +959,6 @@ const styles = StyleSheet.create((theme) => ({
     bottom: 0,
     width: 10,
     zIndex: 10,
-  },
-  sidebarDragArea: {
-    position: "relative",
   },
   hostTrigger: {
     flexDirection: "row",

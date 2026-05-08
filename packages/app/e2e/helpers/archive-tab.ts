@@ -15,6 +15,7 @@ export interface ArchiveTabAgent {
   id: string;
   title: string;
   cwd: string;
+  createdAt: string;
 }
 
 interface ArchiveTabDaemonClient {
@@ -33,9 +34,9 @@ interface ArchiveTabDaemonClient {
   waitForFinish(agentId: string, timeout?: number): Promise<{ status: string }>;
   waitForAgentUpsert(
     agentId: string,
-    predicate: (snapshot: { status: string }) => boolean,
+    predicate: (snapshot: { status: string; createdAt: string }) => boolean,
     timeout?: number,
-  ): Promise<{ status: string }>;
+  ): Promise<{ status: string; createdAt: string }>;
   fetchAgentHistory(options?: {
     page?: { limit: number };
   }): Promise<{ entries: Array<{ id: string }> }>;
@@ -132,6 +133,7 @@ export async function createIdleAgent(
     id: created.id,
     title: input.title,
     cwd: input.cwd,
+    createdAt: snapshot.createdAt,
   };
 }
 
