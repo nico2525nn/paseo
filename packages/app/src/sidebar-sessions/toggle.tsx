@@ -4,6 +4,7 @@ import {
   LayoutList,
   ListFilter,
   MessagesSquare,
+  Plus,
   type LucideIcon,
 } from "lucide-react-native";
 import { memo, useCallback, useMemo, type ReactElement } from "react";
@@ -17,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useOpenProjectPicker } from "@/hooks/use-open-project-picker";
 import { useProjectIconQuery } from "@/hooks/use-project-icon-query";
 import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { SidebarSessionFilter, SidebarSessionViewMode } from "./types";
@@ -105,10 +107,27 @@ function SidebarSessionsFilterMenu({
   const { theme } = useUnistyles();
   const filterActive = filter.type !== "all";
   const visibleFilterProjects = useVisibleSidebarSessionFilterProjects({ serverId, projects });
+  const newSessionIntent = useMemo(
+    () => ({ kind: "new-workspace", headerTitle: "New session" }) as const,
+    [],
+  );
+  const openNewSessionPicker = useOpenProjectPicker(serverId, newSessionIntent);
 
   const handleAllSelect = useCallback(() => {
     onFilterChange({ type: "all" });
   }, [onFilterChange]);
+
+  const handleNewSessionPress = useCallback(() => {
+    void openNewSessionPicker();
+  }, [openNewSessionPicker]);
+
+  const newSessionButtonStyle = useCallback(
+    ({ hovered = false, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.filterButton,
+      (hovered || pressed) && styles.filterButtonHovered,
+    ],
+    [],
+  );
 
   const filterTriggerStyle = useCallback(
     ({ hovered = false, open = false }: PressableStateCallbackType & { open?: boolean }) => [
@@ -149,6 +168,20 @@ function SidebarSessionsFilterMenu({
 
   return (
     <View style={styles.sessionActions}>
+      <Pressable
+        accessibilityLabel="New session"
+        accessibilityRole="button"
+        onPress={handleNewSessionPress}
+        style={newSessionButtonStyle}
+        testID="sidebar-new-session-button"
+      >
+        {({ hovered, pressed }) => (
+          <Plus
+            size={theme.iconSize.sm}
+            color={hovered || pressed ? theme.colors.foreground : theme.colors.foregroundMuted}
+          />
+        )}
+      </Pressable>
       <DropdownMenu>
         <DropdownMenuTrigger
           accessibilityLabel="Filter sessions"

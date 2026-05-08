@@ -70,12 +70,34 @@ vi.mock("@/components/provider-icons", async () => {
   };
 });
 
+vi.mock("./session-row-actions", () => ({
+  SidebarSessionRowKebabMenu: () => null,
+}));
+
+vi.mock("@/components/sidebar/sidebar-project-trailing-actions", () => ({
+  SidebarProjectTrailingActions: () => null,
+}));
+
+vi.mock("expo-router", () => ({
+  router: {
+    navigate: vi.fn(),
+  },
+}));
+
 vi.mock("lucide-react-native", () => {
-  const createIcon = (name: string) => (props: Record<string, unknown>) =>
-    React.createElement("span", { ...props, "data-icon": name });
+  const createIcon = (name: string) =>
+    function Icon({ uniProps: _uniProps, ...props }: Record<string, unknown>) {
+      return React.createElement("span", { ...props, "data-icon": name });
+    };
   return {
+    Archive: createIcon("Archive"),
     ChevronDown: createIcon("ChevronDown"),
     ChevronRight: createIcon("ChevronRight"),
+    FolderPlus: createIcon("FolderPlus"),
+    MoreVertical: createIcon("MoreVertical"),
+    Settings: createIcon("Settings"),
+    Trash2: createIcon("Trash2"),
+    X: createIcon("X"),
   };
 });
 
@@ -86,6 +108,15 @@ vi.mock("@/screens/workspace/workspace-tab-presentation", async () => {
       children({}),
     WorkspaceTabIcon: () =>
       ReactModule.createElement("span", { "data-testid": "workspace-tab-icon" }),
+  };
+});
+
+vi.mock("react-native-draggable-flatlist", async () => {
+  const ReactModule = await import("react");
+  return {
+    NestableScrollContainer: ({ children }: { children?: React.ReactNode }) =>
+      ReactModule.createElement("div", null, children),
+    default: () => null,
   };
 });
 
@@ -104,7 +135,7 @@ vi.mock("react-native-reanimated", () => ({
 
 vi.mock("react-native-unistyles", () => ({
   StyleSheet: {
-    create: (styles: unknown) => (typeof styles === "function" ? styles(testTheme) : styles),
+    create: (styles: (theme: unknown) => unknown) => styles(testTheme),
   },
   withUnistyles: (Component: unknown) => Component,
   useUnistyles: () => ({

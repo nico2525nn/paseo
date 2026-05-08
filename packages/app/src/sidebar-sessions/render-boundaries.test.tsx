@@ -4,17 +4,52 @@
 import { act, fireEvent, render, renderHook } from "@testing-library/react";
 import React from "react";
 import { useCallback, useMemo } from "react";
+import { Pressable, View } from "react-native";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { shallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import type { DaemonClient } from "@server/client/daemon-client";
+import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
 import { useSessionStore, type Agent } from "@/stores/session-store";
 import {
   SidebarSessionGroupFooter,
-  useGroupedSidebarSessionListData,
+  SidebarSessionGroupHeader,
+  useGroupedSidebarSessionGroups,
   useOrderedAgentProjectShape,
 } from "./grouped-view";
 import { selectSidebarSessionSlice } from "./select-sidebar-session-slice";
+
+function gitProject(key: string): SidebarProjectEntry {
+  return {
+    projectKey: key,
+    projectName: `Project ${key}`,
+    projectKind: "git",
+    iconWorkingDir: `/repo/${key}`,
+    workspaces: [
+      {
+        workspaceKey: `server-1:${key}-ws`,
+        serverId: "server-1",
+        workspaceId: `${key}-ws`,
+        projectKey: key,
+        projectRootPath: `/repo/${key}`,
+        workspaceDirectory: `/repo/${key}/ws`,
+        projectKind: "git",
+        workspaceKind: "checkout",
+        name: `${key}-ws`,
+        statusBucket: "done",
+        archivingAt: null,
+        diffStat: null,
+        scripts: [],
+        hasRunningScripts: false,
+      },
+    ],
+  };
+}
+
+const HARNESS_PROJECTS: readonly SidebarProjectEntry[] = [
+  gitProject("project-a"),
+  gitProject("project-b"),
+];
 
 vi.hoisted(() => {
   Object.assign(globalThis, { __DEV__: false });
@@ -30,8 +65,63 @@ vi.mock("lucide-react-native", () => {
   return {
     ChevronDown: createIcon("ChevronDown"),
     ChevronRight: createIcon("ChevronRight"),
+    FolderPlus: createIcon("FolderPlus"),
+    MoreVertical: createIcon("MoreVertical"),
+    Settings: createIcon("Settings"),
+    Trash2: createIcon("Trash2"),
   };
 });
+
+vi.mock("expo-router", () => ({
+  router: {
+    navigate: vi.fn(),
+  },
+}));
+
+vi.mock("@/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+  DropdownMenuItem: ({ children, testID }: { children: React.ReactNode; testID?: string }) => (
+    <View testID={testID}>{children}</View>
+  ),
+  DropdownMenuTrigger: ({
+    children,
+    testID,
+  }: {
+    children: React.ReactNode | ((state: { hovered: boolean }) => React.ReactNode);
+    testID?: string;
+  }) => (
+    <Pressable testID={testID}>
+      {typeof children === "function" ? children({ hovered: false }) : children}
+    </Pressable>
+  ),
+}));
+
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+  TooltipTrigger: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock("@/components/ui/shortcut", () => ({
+  Shortcut: () => <View />,
+}));
+
+vi.mock("@/constants/platform", () => ({
+  isNative: false,
+}));
+
+vi.mock("@/constants/layout", () => ({
+  useIsCompactFormFactor: () => false,
+}));
+
+vi.mock("@/contexts/toast-context", () => ({
+  useToast: () => ({ error: vi.fn() }),
+}));
+
+vi.mock("@/hooks/use-shortcut-keys", () => ({
+  useShortcutKeys: () => null,
+}));
 
 const TIMESTAMP = new Date("2026-05-08T10:00:00.000Z");
 const SERVER_ID = "server-1";
@@ -41,7 +131,7 @@ vi.mock("react-native-unistyles", () => ({
     create: (styles: unknown) =>
       typeof styles === "function"
         ? styles({
-            borderRadius: { lg: 8, sm: 4 },
+            borderRadius: { lg: 8, md: 6, sm: 4 },
             colors: {
               border: "#dddddd",
               foreground: "#111111",
@@ -56,6 +146,10 @@ vi.mock("react-native-unistyles", () => ({
           })
         : styles,
   },
+  withUnistyles: (Component: React.ComponentType<Record<string, unknown>>) =>
+    function ThemedComponent(props: Record<string, unknown>) {
+      return <Component {...props} />;
+    },
 }));
 
 const AGENT_DEFAULTS: Agent = {
@@ -131,11 +225,11 @@ function useGroupedBoundaryHarness(input?: { collapsedProjectKeys?: ReadonlySet<
   const fallbackCollapsed = useMemo(() => new Set<string>(), []);
   const collapsedProjectKeys = input?.collapsedProjectKeys ?? fallbackCollapsed;
 
-  return useGroupedSidebarSessionListData({
+  return useGroupedSidebarSessionGroups({
     agentsWithProjects,
+    projects: HARNESS_PROJECTS,
     previewExpandedProjects,
     collapsedProjectKeys,
-    serverId: SERVER_ID,
   });
 }
 
@@ -192,11 +286,11 @@ describe("sidebar session render boundaries", () => {
     expect(shallow(beforeSlice, afterSlice)).toBe(true);
   });
 
-  it("keeps grouped flattened data stable when activity changes without reordering ids", () => {
+  it("keeps grouped section data stable when activity changes without reordering ids", () => {
     seedAgents([makeAgent({ id: "agent-1" }), makeAgent({ id: "agent-2", cwd: "/repo/main-2" })]);
 
     const { result } = renderHook(() => useGroupedBoundaryHarness());
-    const beforeData = result.current;
+    const beforeGroups = result.current;
 
     act(() => {
       useSessionStore.getState().setAgents(
@@ -214,14 +308,14 @@ describe("sidebar session render boundaries", () => {
       );
     });
 
-    expect(result.current).toBe(beforeData);
+    expect(result.current).toBe(beforeGroups);
   });
 
-  it("changes grouped flattened data when cwd resolves to a different project", () => {
+  it("changes grouped section data when cwd resolves to a different project", () => {
     seedAgents([makeAgent({ id: "agent-1", cwd: "/repo/a" })]);
 
     const { result } = renderHook(() => useGroupedBoundaryHarness());
-    const beforeData = result.current;
+    const beforeGroups = result.current;
 
     act(() => {
       useSessionStore
@@ -229,15 +323,18 @@ describe("sidebar session render boundaries", () => {
         .setAgents(SERVER_ID, new Map([["agent-1", makeAgent({ id: "agent-1", cwd: "/repo/b" })]]));
     });
 
-    expect(result.current).not.toBe(beforeData);
-    expect(result.current[0]).toMatchObject({ kind: "header", projectKey: "project-b" });
+    expect(result.current).not.toBe(beforeGroups);
+    expect(result.current[0]).toMatchObject({
+      projectKey: "project-b",
+      visibleIds: ["agent-1"],
+    });
   });
 
-  it("keeps grouped flattened data stable when cwd changes but resolves to the same project", () => {
+  it("keeps grouped section data stable when cwd changes but resolves to the same project", () => {
     seedAgents([makeAgent({ id: "agent-1", cwd: "/repo/a" })]);
 
     const { result } = renderHook(() => useGroupedBoundaryHarness());
-    const beforeData = result.current;
+    const beforeGroups = result.current;
 
     act(() => {
       useSessionStore
@@ -248,10 +345,10 @@ describe("sidebar session render boundaries", () => {
         );
     });
 
-    expect(result.current).toBe(beforeData);
+    expect(result.current).toBe(beforeGroups);
   });
 
-  it("emits header only (no rows or footer) for a collapsed project", () => {
+  it("emits a collapsed group with no visible ids and zero hidden count", () => {
     const overLimit = Array.from({ length: 10 }, (_, index) =>
       makeAgent({ id: `agent-${index + 1}`, cwd: "/repo/a" }),
     );
@@ -263,9 +360,11 @@ describe("sidebar session render boundaries", () => {
 
     expect(result.current).toEqual([
       expect.objectContaining({
-        kind: "header",
         projectKey: "project-a",
         isCollapsed: true,
+        visibleIds: [],
+        hiddenCount: 0,
+        totalCount: 10,
       }),
     ]);
   });
@@ -285,5 +384,22 @@ describe("sidebar session render boundaries", () => {
     fireEvent.click(getByTestId("sidebar-session-group-footer-project-a"));
 
     expect(onPress).toHaveBeenCalledWith("project-a");
+  });
+
+  it("renders the project kebab in the grouped header", () => {
+    const { getByTestId, queryByTestId } = render(
+      <SidebarSessionGroupHeader
+        serverId="server-1"
+        projectKey="project-a"
+        projectName="Project A"
+        projectIconKey="/repo/a"
+        workspaces={HARNESS_PROJECTS[0].workspaces}
+        isCollapsed={false}
+        onToggleCollapsed={vi.fn()}
+      />,
+    );
+
+    expect(getByTestId("sidebar-project-kebab-project-a")).toBeTruthy();
+    expect(queryByTestId("sidebar-project-new-worktree-project-a")).toBeNull();
   });
 });

@@ -1,10 +1,17 @@
-import React, { memo, useCallback, useMemo, useState, type ReactElement } from "react";
+import React, { memo, useCallback, useMemo, useState, type ReactElement, type Ref } from "react";
 import { Pressable, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { shallow } from "zustand/shallow";
 import { useStoreWithEqualityFn } from "zustand/traditional";
 import { SidebarProjectHeaderRow } from "@/components/sidebar/sidebar-collapsible-project-section";
+import { SidebarProjectTrailingActions } from "@/components/sidebar/sidebar-project-trailing-actions";
+import type { DraggableListDragHandleProps } from "@/components/draggable-list.types";
+import { useLongPressDragInteraction } from "@/components/sidebar/use-long-press-drag-interaction";
 import { useProjectIconQuery } from "@/hooks/use-project-icon-query";
+import type {
+  SidebarProjectEntry,
+  SidebarWorkspaceEntry,
+} from "@/hooks/use-sidebar-workspaces-list";
 import { useSessionStore } from "@/stores/session-store";
 import {
   deriveGroupedSidebarSessions,
@@ -13,20 +20,9 @@ import {
 } from "./session-filtering";
 import type { ResolvedSidebarSessionProject } from "./types";
 
-const GROUPED_SESSION_LIMIT = 6;
+export const GROUPED_SESSION_LIMIT = 6;
 
 type SessionStoreState = ReturnType<typeof useSessionStore.getState>;
-
-export type SidebarSessionListItem =
-  | {
-      kind: "header";
-      projectKey: string;
-      projectName: string;
-      projectIconKey: string | null;
-      isCollapsed: boolean;
-    }
-  | { kind: "row"; id: string; serverId: string }
-  | { kind: "footer"; projectKey: string; hiddenCount: number; isExpanded: boolean };
 
 type ResolveCwdToProject = (cwd: string) => ResolvedSidebarSessionProject | null;
 
@@ -62,17 +58,9 @@ export function useOrderedAgentProjectShape(input: {
 
         const previous = previousById.get(id);
         const next =
-          previous &&
-          previous.projectKey === project.projectKey &&
-          previous.projectIconKey === project.projectIconKey &&
-          previous.projectName === project.projectName
+          previous && previous.projectKey === project.projectKey
             ? previous
-            : {
-                id,
-                projectKey: project.projectKey,
-                projectIconKey: project.projectIconKey,
-                projectName: project.projectName,
-              };
+            : { id, projectKey: project.projectKey };
 
         nextById.set(id, next);
         agentsWithProjects.push(next);
@@ -86,62 +74,28 @@ export function useOrderedAgentProjectShape(input: {
   return useStoreWithEqualityFn(useSessionStore, selector, shallow);
 }
 
-export function useGroupedSidebarSessionListData(input: {
+export function useGroupedSidebarSessionGroups(input: {
   agentsWithProjects: readonly SidebarSessionAgentProject[];
+  projects: readonly SidebarProjectEntry[];
   previewExpandedProjects: ReadonlySet<string>;
   collapsedProjectKeys: ReadonlySet<string>;
-  serverId: string | null;
-}): readonly SidebarSessionListItem[] {
-  const groupedSessions = useMemo(
+}): readonly SidebarSessionGroup[] {
+  return useMemo(
     () =>
       deriveGroupedSidebarSessions({
         agentsWithProjects: input.agentsWithProjects,
+        projects: input.projects,
         previewExpandedProjects: input.previewExpandedProjects,
         collapsedProjectKeys: input.collapsedProjectKeys,
         limit: GROUPED_SESSION_LIMIT,
       }),
-    [input.agentsWithProjects, input.collapsedProjectKeys, input.previewExpandedProjects],
+    [
+      input.agentsWithProjects,
+      input.collapsedProjectKeys,
+      input.previewExpandedProjects,
+      input.projects,
+    ],
   );
-
-  return useMemo(
-    () => flattenGroupedSidebarSessions(groupedSessions, input.serverId),
-    [groupedSessions, input.serverId],
-  );
-}
-
-export function flattenGroupedSidebarSessions(
-  groupedSessions: readonly SidebarSessionGroup[],
-  serverId: string | null,
-): readonly SidebarSessionListItem[] {
-  if (!serverId) {
-    return [];
-  }
-
-  const items: SidebarSessionListItem[] = [];
-  for (const group of groupedSessions) {
-    items.push({
-      kind: "header",
-      projectKey: group.projectKey,
-      projectName: group.projectName,
-      projectIconKey: group.projectIconKey,
-      isCollapsed: group.isCollapsed,
-    });
-    if (group.isCollapsed) {
-      continue;
-    }
-    for (const id of group.visibleIds) {
-      items.push({ kind: "row", id, serverId });
-    }
-    if (group.totalCount > GROUPED_SESSION_LIMIT) {
-      items.push({
-        kind: "footer",
-        projectKey: group.projectKey,
-        hiddenCount: group.hiddenCount,
-        isExpanded: group.isExpanded,
-      });
-    }
-  }
-  return items;
 }
 
 export const SidebarSessionGroupHeader = memo(function SidebarSessionGroupHeader({
@@ -149,14 +103,22 @@ export const SidebarSessionGroupHeader = memo(function SidebarSessionGroupHeader
   projectKey,
   projectName,
   projectIconKey,
+  workspaces,
   isCollapsed,
+  isDragging = false,
+  drag,
+  dragHandleProps,
   onToggleCollapsed,
 }: {
   serverId: string | null;
   projectKey: string;
   projectName: string;
   projectIconKey: string | null;
+  workspaces: readonly SidebarWorkspaceEntry[];
   isCollapsed: boolean;
+  isDragging?: boolean;
+  drag?: () => void;
+  dragHandleProps?: DraggableListDragHandleProps;
   onToggleCollapsed: (projectKey: string) => void;
 }): ReactElement {
   const { icon } = useProjectIconQuery({ serverId: serverId ?? "", cwd: projectIconKey ?? "" });
@@ -170,24 +132,57 @@ export const SidebarSessionGroupHeader = memo(function SidebarSessionGroupHeader
   const [isHovered, setIsHovered] = useState(false);
   const handlePointerEnter = useCallback(() => setIsHovered(true), []);
   const handlePointerLeave = useCallback(() => setIsHovered(false), []);
+  const interaction = useLongPressDragInteraction({
+    drag: drag ?? noopDrag,
+    menuController: null,
+  });
+  const trailingSlot = useMemo(
+    () => (
+      <SidebarProjectTrailingActions
+        projectKey={projectKey}
+        projectName={projectName}
+        serverId={serverId}
+        isHovered={isHovered}
+        workspaces={workspaces}
+      />
+    ),
+    [isHovered, projectKey, projectName, serverId, workspaces],
+  );
   const handlePress = useCallback(() => {
+    if (interaction.didLongPressRef.current) {
+      interaction.didLongPressRef.current = false;
+      return;
+    }
     onToggleCollapsed(projectKey);
-  }, [onToggleCollapsed, projectKey]);
+  }, [interaction.didLongPressRef, onToggleCollapsed, projectKey]);
 
   return (
-    <View onPointerEnter={handlePointerEnter} onPointerLeave={handlePointerLeave}>
+    <View
+      {...dragHandleProps?.attributes}
+      {...dragHandleProps?.listeners}
+      ref={dragHandleProps?.setActivatorNodeRef as unknown as Ref<View>}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+    >
       <SidebarProjectHeaderRow
         projectName={projectName}
         iconDataUri={dataUri}
         chevron={isCollapsed ? "expand" : "collapse"}
         isHovered={isHovered}
+        isDragging={isDragging}
+        trailingSlot={trailingSlot}
         onPress={handlePress}
+        onPressIn={drag ? interaction.handlePressIn : undefined}
+        onTouchMove={drag ? interaction.handleTouchMove : undefined}
+        onPressOut={drag ? interaction.handlePressOut : undefined}
         testID={`sidebar-session-group-header-${projectKey}`}
         accessibilityLabel={isCollapsed ? `Expand ${projectName}` : `Collapse ${projectName}`}
       />
     </View>
   );
 });
+
+function noopDrag() {}
 
 export const SidebarSessionGroupFooter = memo(function SidebarSessionGroupFooter({
   projectKey,

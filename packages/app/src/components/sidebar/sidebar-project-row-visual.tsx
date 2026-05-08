@@ -1,4 +1,4 @@
-import { memo, useMemo, type ReactElement } from "react";
+import React, { memo, useMemo, type ReactElement } from "react";
 import { Image, Text, View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { projectIconPlaceholderLabelFromDisplayName } from "@/utils/project-display-name";

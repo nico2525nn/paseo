@@ -2,15 +2,22 @@ import React, { memo, useCallback, useMemo, useState, type ReactElement } from "
 import {
   FlatList,
   Pressable,
+  ScrollView,
   Text,
   View,
   type ListRenderItem,
   type PressableStateCallbackType,
 } from "react-native";
+import { NestableScrollContainer } from "react-native-draggable-flatlist";
 import { useShallow } from "zustand/shallow";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
+import { isNative as platformIsNative } from "@/constants/platform";
 import { SidebarAgentListSkeleton } from "@/components/sidebar-agent-list-skeleton";
 import { sidebarProjectChildIndentStyles } from "@/components/sidebar/sidebar-collapsible-project-section";
+import {
+  SidebarProjectsDraggableList,
+  type SidebarProjectDragInfo,
+} from "@/components/sidebar/sidebar-projects-draggable-list";
 import {
   type AggregatedAgentIdEntry,
   useAggregatedAgentIds,
@@ -30,17 +37,19 @@ import {
   resolveSidebarSessionWorkspaceId,
   resolveSidebarSessionWorkspace,
   shouldIncludeSidebarSessionAgent,
+  type SidebarSessionGroup,
 } from "./session-filtering";
 import { selectSidebarSessionSlice } from "./select-sidebar-session-slice";
 import type { ResolvedSidebarSessionProject, SidebarSessionFilter } from "./types";
 import { useSidebarSessionWorkspaces } from "./use-sidebar-session-workspaces";
 import {
+  GROUPED_SESSION_LIMIT,
   SidebarSessionGroupFooter,
   SidebarSessionGroupHeader,
-  type SidebarSessionListItem,
-  useGroupedSidebarSessionListData,
+  useGroupedSidebarSessionGroups,
   useOrderedAgentProjectShape,
 } from "./grouped-view";
+import { SidebarSessionRowKebabMenu } from "./session-row-actions";
 
 interface SidebarSessionsViewProps {
   serverId: string | null;
@@ -111,6 +120,7 @@ export function SidebarSessionsView({
       <GroupedSidebarSessionsList
         serverId={serverId}
         sessionIds={sessionIds}
+        projects={projects}
         resolveCwdToProject={resolveCwdToProject}
         previewExpandedProjects={previewExpandedProjects}
         collapsedProjectKeys={collapsedProjectKeys}
@@ -153,6 +163,7 @@ const FlatSidebarSessionsList = memo(function FlatSidebarSessionsList({
 const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
   serverId,
   sessionIds,
+  projects,
   resolveCwdToProject,
   previewExpandedProjects,
   collapsedProjectKeys,
@@ -161,6 +172,7 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
 }: {
   serverId: string | null;
   sessionIds: readonly string[];
+  projects: readonly SidebarProjectEntry[];
   resolveCwdToProject: (cwd: string) => ResolvedSidebarSessionProject | null;
   previewExpandedProjects: ReadonlySet<string>;
   collapsedProjectKeys: ReadonlySet<string>;
@@ -172,64 +184,139 @@ const GroupedSidebarSessionsList = memo(function GroupedSidebarSessionsList({
     serverId: serverId ?? "",
     resolveCwdToProject,
   });
-  const data = useGroupedSidebarSessionListData({
+  const groups = useGroupedSidebarSessionGroups({
     agentsWithProjects,
+    projects,
     previewExpandedProjects,
     collapsedProjectKeys,
-    serverId,
   });
 
-  const renderItem: ListRenderItem<SidebarSessionListItem> = useCallback(
-    ({ item }) => {
-      switch (item.kind) {
-        case "header":
-          return (
-            <SidebarSessionGroupHeader
-              serverId={serverId}
-              projectKey={item.projectKey}
-              projectName={item.projectName}
-              projectIconKey={item.projectIconKey}
-              isCollapsed={item.isCollapsed}
-              onToggleCollapsed={onProjectCollapsedToggle}
-            />
-          );
-        case "row":
-          return <SidebarSessionRow id={item.id} serverId={item.serverId} indented />;
-        case "footer":
-          return (
-            <SidebarSessionGroupFooter
-              projectKey={item.projectKey}
-              hiddenCount={item.hiddenCount}
-              isExpanded={item.isExpanded}
-              onPress={onProjectPreviewExpandedToggle}
-            />
-          );
-      }
-    },
-    [onProjectCollapsedToggle, onProjectPreviewExpandedToggle, serverId],
-  );
-  const keyExtractor = useCallback((item: SidebarSessionListItem) => {
-    switch (item.kind) {
-      case "header":
-        return `header:${item.projectKey}`;
-      case "row":
-        return `row:${item.id}`;
-      case "footer":
-        return `footer:${item.projectKey}`;
+  const groupsByKey = useMemo(() => {
+    const map = new Map<string, SidebarSessionGroup>();
+    for (const group of groups) {
+      map.set(group.projectKey, group);
     }
-  }, []);
+    return map;
+  }, [groups]);
 
-  return (
-    <FlatList
-      data={data}
+  const projectsWithSessions = useMemo(
+    () => projects.filter((project) => groupsByKey.has(project.projectKey)),
+    [groupsByKey, projects],
+  );
+
+  const renderProject = useCallback(
+    ({ project, drag, isDragging, dragHandleProps }: SidebarProjectDragInfo) => {
+      const group = groupsByKey.get(project.projectKey);
+      if (!group) {
+        return <View />;
+      }
+      return (
+        <SidebarSessionGroupSection
+          serverId={serverId}
+          project={project}
+          group={group}
+          drag={drag}
+          isDragging={isDragging}
+          dragHandleProps={dragHandleProps}
+          onProjectCollapsedToggle={onProjectCollapsedToggle}
+          onProjectPreviewExpandedToggle={onProjectPreviewExpandedToggle}
+        />
+      );
+    },
+    [groupsByKey, onProjectCollapsedToggle, onProjectPreviewExpandedToggle, serverId],
+  );
+
+  if (projectsWithSessions.length === 0) {
+    return (
+      <View style={styles.list}>
+        <View style={styles.listContent}>
+          <EmptySessions />
+        </View>
+      </View>
+    );
+  }
+
+  const draggableList = (
+    <SidebarProjectsDraggableList
+      testID="sidebar-session-group-list"
+      projects={projectsWithSessions}
+      serverId={serverId}
+      renderProject={renderProject}
+      nestable={platformIsNative}
+    />
+  );
+
+  return platformIsNative ? (
+    <NestableScrollContainer
       style={styles.list}
       contentContainerStyle={styles.listContent}
-      keyExtractor={keyExtractor}
-      renderItem={renderItem}
       showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      ListEmptyComponent={EmptySessions}
-    />
+      testID="sidebar-session-group-scroll"
+    >
+      {draggableList}
+    </NestableScrollContainer>
+  ) : (
+    <ScrollView
+      style={styles.list}
+      contentContainerStyle={styles.listContent}
+      showsVerticalScrollIndicator={false}
+      testID="sidebar-session-group-scroll"
+    >
+      {draggableList}
+    </ScrollView>
+  );
+});
+
+const SidebarSessionGroupSection = memo(function SidebarSessionGroupSection({
+  serverId,
+  project,
+  group,
+  drag,
+  isDragging,
+  dragHandleProps,
+  onProjectCollapsedToggle,
+  onProjectPreviewExpandedToggle,
+}: {
+  serverId: string | null;
+  project: SidebarProjectEntry;
+  group: SidebarSessionGroup;
+  drag: () => void;
+  isDragging: boolean;
+  dragHandleProps?: SidebarProjectDragInfo["dragHandleProps"];
+  onProjectCollapsedToggle: (projectKey: string) => void;
+  onProjectPreviewExpandedToggle: (projectKey: string) => void;
+}): ReactElement {
+  const showFooter = !group.isCollapsed && group.totalCount > GROUPED_SESSION_LIMIT;
+  return (
+    <View>
+      {!group.isFlattened ? (
+        <SidebarSessionGroupHeader
+          serverId={serverId}
+          projectKey={group.projectKey}
+          projectName={group.projectName}
+          projectIconKey={group.projectIconKey}
+          workspaces={project.workspaces}
+          isCollapsed={group.isCollapsed}
+          isDragging={isDragging}
+          drag={drag}
+          dragHandleProps={dragHandleProps}
+          onToggleCollapsed={onProjectCollapsedToggle}
+        />
+      ) : null}
+      {serverId
+        ? group.visibleIds.map((id) => (
+            <SidebarSessionRow key={id} id={id} serverId={serverId} indented={!group.isFlattened} />
+          ))
+        : null}
+      {showFooter ? (
+        <SidebarSessionGroupFooter
+          projectKey={group.projectKey}
+          hiddenCount={group.hiddenCount}
+          isExpanded={group.isExpanded}
+          onPress={onProjectPreviewExpandedToggle}
+        />
+      ) : null}
+    </View>
   );
 });
 
@@ -339,6 +426,7 @@ const SidebarSessionRow = memo(function SidebarSessionRow({
         <Text style={styles.timeAgo} numberOfLines={1}>
           {formatTimeAgo(agent.lastActivityAt)}
         </Text>
+        <SidebarSessionRowKebabMenu serverId={serverId} agentId={id} isHovered={isHovered} />
       </Pressable>
     </View>
   );

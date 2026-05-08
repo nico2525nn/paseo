@@ -8,11 +8,10 @@ import {
 } from "./session-filtering";
 import type { SidebarSessionAgent, SidebarSessionWorkspace } from "./types";
 
-interface TestProject {
-  projectKey: string;
-  projectName: string;
-  projectIconKey: string | null;
-}
+import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
+import type { WorkspaceDescriptor } from "@/stores/session-store";
+
+type ProjectKind = WorkspaceDescriptor["projectKind"];
 
 const WORKSPACES: SidebarSessionWorkspace[] = [
   {
@@ -71,19 +70,41 @@ function projectWorkspaceKeys(project: {
   };
 }
 
-function testProject(key: string, name = key): TestProject {
+function testProject(
+  key: string,
+  options: { name?: string; projectKind?: ProjectKind; workspaceCount?: number } = {},
+): SidebarProjectEntry {
+  const projectKind: ProjectKind = options.projectKind ?? "git";
+  const workspaceCount = options.workspaceCount ?? (projectKind === "git" ? 2 : 1);
   return {
     projectKey: key,
-    projectName: name,
-    projectIconKey: `/repo/${key}`,
+    projectName: options.name ?? key,
+    projectKind,
+    iconWorkingDir: `/repo/${key}`,
+    workspaces: Array.from({ length: workspaceCount }, (_, index) => ({
+      workspaceKey: `server-1:${key}-${index}`,
+      serverId: "server-1",
+      workspaceId: `${key}-${index}`,
+      projectKey: key,
+      projectRootPath: `/repo/${key}`,
+      workspaceDirectory: `/repo/${key}/${index}`,
+      projectKind,
+      workspaceKind: "checkout",
+      name: `${key}-${index}`,
+      statusBucket: "done",
+      archivingAt: null,
+      diffStat: null,
+      scripts: [],
+      hasRunningScripts: false,
+    })),
   };
 }
 
-function agentProject(id: string, project: TestProject) {
-  return { id, ...project };
+function agentProject(id: string, project: SidebarProjectEntry) {
+  return { id, projectKey: project.projectKey };
 }
 
-function agentProjects(ids: readonly string[], project: TestProject) {
+function agentProjects(ids: readonly string[], project: SidebarProjectEntry) {
   return ids.map((id) => agentProject(id, project));
 }
 
@@ -219,14 +240,17 @@ describe("deriveGroupedSidebarSessions", () => {
     expect(
       deriveGroupedSidebarSessions({
         agentsWithProjects: [],
+        projects: [],
         previewExpandedProjects: new Set(),
       }),
     ).toEqual([]);
   });
 
   it("keeps a single project under the limit fully visible and collapsed", () => {
+    const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: agentProjects(["a1", "a2", "a3"], testProject("project-a")),
+      agentsWithProjects: agentProjects(["a1", "a2", "a3"], projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
       limit: 6,
     });
@@ -240,6 +264,7 @@ describe("deriveGroupedSidebarSessions", () => {
         hiddenCount: 0,
         isExpanded: false,
         isCollapsed: false,
+        isFlattened: false,
         totalCount: 3,
       },
     ]);
@@ -250,6 +275,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
       limit: 6,
     });
@@ -268,6 +294,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(["project-a"]),
       limit: 6,
     });
@@ -283,8 +310,10 @@ describe("deriveGroupedSidebarSessions", () => {
 
   it("hides all rows when a project is collapsed", () => {
     const orderedIds = Array.from({ length: 10 }, (_, index) => `a${index + 1}`);
+    const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: agentProjects(orderedIds, testProject("project-a")),
+      agentsWithProjects: agentProjects(orderedIds, projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
       collapsedProjectKeys: new Set(["project-a"]),
       limit: 6,
@@ -301,8 +330,10 @@ describe("deriveGroupedSidebarSessions", () => {
 
   it("collapsed wins over preview-expanded", () => {
     const orderedIds = Array.from({ length: 10 }, (_, index) => `a${index + 1}`);
+    const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: agentProjects(orderedIds, testProject("project-a")),
+      agentsWithProjects: agentProjects(orderedIds, projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(["project-a"]),
       collapsedProjectKeys: new Set(["project-a"]),
       limit: 6,
@@ -315,42 +346,93 @@ describe("deriveGroupedSidebarSessions", () => {
     });
   });
 
-  it("orders projects by first occurrence in ordered ids", () => {
+  it("orders projects by the canonical project list, ignoring agent first-occurrence", () => {
+    const projectA = testProject("project-a");
+    const projectB = testProject("project-b");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: [
-        agentProject("a1", testProject("project-a")),
-        agentProject("b1", testProject("project-b")),
-        agentProject("a2", testProject("project-a")),
+        agentProject("b1", projectB),
+        agentProject("a1", projectA),
+        agentProject("b2", projectB),
+        agentProject("a2", projectA),
       ],
+      projects: [projectA, projectB],
       previewExpandedProjects: new Set(),
     });
 
-    expect(groups.map((group) => group.projectKey)).toEqual(["project-a", "project-b"]);
+    expect(groups.map((group) => ({ key: group.projectKey, ids: group.visibleIds }))).toEqual([
+      { key: "project-a", ids: ["a1", "a2"] },
+      { key: "project-b", ids: ["b1", "b2"] },
+    ]);
   });
 
   it("preserves order within each project", () => {
+    const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: agentProjects(["a1", "a2", "a3"], testProject("project-a")),
+      agentsWithProjects: agentProjects(["a1", "a2", "a3"], projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
     });
 
     expect(groups[0]?.visibleIds).toEqual(["a1", "a2", "a3"]);
   });
 
-  it("preserves mapped project order after unmapped ids are filtered upstream", () => {
+  it("skips projects that have no agents", () => {
+    const projectA = testProject("project-a");
+    const projectB = testProject("project-b");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: [
-        agentProject("a1", testProject("project-a")),
-        agentProject("b1", testProject("project-b")),
-        agentProject("a2", testProject("project-a")),
-      ],
+      agentsWithProjects: agentProjects(["a1", "a2"], projectA),
+      projects: [projectA, projectB],
       previewExpandedProjects: new Set(),
     });
 
-    expect(groups.map((group) => ({ key: group.projectKey, ids: group.visibleIds }))).toEqual([
-      { key: "project-a", ids: ["a1", "a2"] },
-      { key: "project-b", ids: ["b1"] },
-    ]);
+    expect(groups.map((group) => group.projectKey)).toEqual(["project-a"]);
+  });
+
+  it("flattens a single non-git workspace project (no header, ignores collapse)", () => {
+    const projectA = testProject("project-a", { projectKind: "directory", workspaceCount: 1 });
+    const groups = deriveGroupedSidebarSessions({
+      agentsWithProjects: agentProjects(["a1", "a2"], projectA),
+      projects: [projectA],
+      previewExpandedProjects: new Set(),
+      collapsedProjectKeys: new Set(["project-a"]),
+    });
+
+    expect(groups[0]).toMatchObject({
+      isFlattened: true,
+      isCollapsed: false,
+      visibleIds: ["a1", "a2"],
+    });
+  });
+
+  it("keeps multi-workspace non-git projects collapsible", () => {
+    const projectA = testProject("project-a", { projectKind: "directory", workspaceCount: 2 });
+    const groups = deriveGroupedSidebarSessions({
+      agentsWithProjects: agentProjects(["a1", "a2"], projectA),
+      projects: [projectA],
+      previewExpandedProjects: new Set(),
+      collapsedProjectKeys: new Set(["project-a"]),
+    });
+
+    expect(groups[0]).toMatchObject({
+      isFlattened: false,
+      isCollapsed: true,
+    });
+  });
+
+  it("keeps single-workspace git projects collapsible (not flattened)", () => {
+    const projectA = testProject("project-a", { projectKind: "git", workspaceCount: 1 });
+    const groups = deriveGroupedSidebarSessions({
+      agentsWithProjects: agentProjects(["a1", "a2"], projectA),
+      projects: [projectA],
+      previewExpandedProjects: new Set(),
+      collapsedProjectKeys: new Set(["project-a"]),
+    });
+
+    expect(groups[0]).toMatchObject({
+      isFlattened: false,
+      isCollapsed: true,
+    });
   });
 
   it("defaults the collapsed limit to 6", () => {
@@ -358,6 +440,7 @@ describe("deriveGroupedSidebarSessions", () => {
     const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
       agentsWithProjects: agentProjects(orderedIds, projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
     });
 
@@ -366,8 +449,10 @@ describe("deriveGroupedSidebarSessions", () => {
   });
 
   it("honors a custom collapsed limit", () => {
+    const projectA = testProject("project-a");
     const groups = deriveGroupedSidebarSessions({
-      agentsWithProjects: agentProjects(["a1", "a2", "a3", "a4"], testProject("project-a")),
+      agentsWithProjects: agentProjects(["a1", "a2", "a3", "a4"], projectA),
+      projects: [projectA],
       previewExpandedProjects: new Set(),
       limit: 2,
     });

@@ -1,6 +1,7 @@
 import type { SidebarSessionAgent, SidebarSessionFilter, SidebarSessionWorkspace } from "./types";
 import type { SidebarProjectEntry } from "@/hooks/use-sidebar-workspaces-list";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
+import { isSidebarProjectFlattened } from "@/utils/sidebar-project-row-model";
 import { normalizeWorkspacePath } from "@/utils/workspace-identity";
 
 export interface SidebarSessionWorkspaceLookup {
@@ -19,21 +20,13 @@ export interface SidebarSessionGroup {
   hiddenCount: number;
   isExpanded: boolean;
   isCollapsed: boolean;
+  isFlattened: boolean;
   totalCount: number;
 }
 
 export interface SidebarSessionAgentProject {
   id: string;
   projectKey: string;
-  projectName: string;
-  projectIconKey: string | null;
-}
-
-interface SidebarSessionGroupDraft {
-  projectKey: string;
-  projectName: string;
-  projectIconKey: string | null;
-  ids: string[];
 }
 
 const DEFAULT_GROUPED_SESSION_LIMIT = 6;
@@ -149,6 +142,7 @@ export function deriveSidebarSessionFilterProjects(input: {
 
 export function deriveGroupedSidebarSessions(input: {
   agentsWithProjects: readonly SidebarSessionAgentProject[];
+  projects: readonly SidebarProjectEntry[];
   previewExpandedProjects?: ReadonlySet<string>;
   collapsedProjectKeys?: ReadonlySet<string>;
   limit?: number;
@@ -156,36 +150,39 @@ export function deriveGroupedSidebarSessions(input: {
   const limit = input.limit ?? DEFAULT_GROUPED_SESSION_LIMIT;
   const previewExpandedProjects = input.previewExpandedProjects ?? EMPTY_KEY_SET;
   const collapsedProjectKeys = input.collapsedProjectKeys ?? EMPTY_KEY_SET;
-  const groupsByProject = new Map<string, SidebarSessionGroupDraft>();
 
+  const idsByProject = new Map<string, string[]>();
   for (const agent of input.agentsWithProjects) {
-    let group = groupsByProject.get(agent.projectKey);
-    if (!group) {
-      group = {
-        projectKey: agent.projectKey,
-        projectName: agent.projectName,
-        projectIconKey: agent.projectIconKey,
-        ids: [],
-      };
-      groupsByProject.set(agent.projectKey, group);
+    let ids = idsByProject.get(agent.projectKey);
+    if (!ids) {
+      ids = [];
+      idsByProject.set(agent.projectKey, ids);
     }
-    group.ids.push(agent.id);
+    ids.push(agent.id);
   }
 
-  return Array.from(groupsByProject.values(), (group) => {
-    const isCollapsed = collapsedProjectKeys.has(group.projectKey);
-    const isExpanded = !isCollapsed && previewExpandedProjects.has(group.projectKey);
-    return {
-      projectKey: group.projectKey,
-      projectName: group.projectName,
-      projectIconKey: group.projectIconKey,
-      visibleIds: visibleIdsFor({ ids: group.ids, isCollapsed, isExpanded, limit }),
-      hiddenCount: hiddenCountFor({ totalCount: group.ids.length, isCollapsed, isExpanded, limit }),
+  const groups: SidebarSessionGroup[] = [];
+  for (const project of input.projects) {
+    const ids = idsByProject.get(project.projectKey);
+    if (!ids || ids.length === 0) {
+      continue;
+    }
+    const isFlattened = isSidebarProjectFlattened(project);
+    const isCollapsed = !isFlattened && collapsedProjectKeys.has(project.projectKey);
+    const isExpanded = !isCollapsed && previewExpandedProjects.has(project.projectKey);
+    groups.push({
+      projectKey: project.projectKey,
+      projectName: project.projectName,
+      projectIconKey: project.iconWorkingDir || null,
+      visibleIds: visibleIdsFor({ ids, isCollapsed, isExpanded, limit }),
+      hiddenCount: hiddenCountFor({ totalCount: ids.length, isCollapsed, isExpanded, limit }),
       isExpanded,
       isCollapsed,
-      totalCount: group.ids.length,
-    };
-  });
+      isFlattened,
+      totalCount: ids.length,
+    });
+  }
+  return groups;
 }
 
 function visibleIdsFor(input: {
