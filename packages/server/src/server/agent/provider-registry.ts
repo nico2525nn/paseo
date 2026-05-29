@@ -36,6 +36,8 @@ import { GenericACPAgentClient } from "./providers/generic-acp-agent.js";
 import { KiroACPAgentClient } from "./providers/kiro-acp-agent.js";
 import { OpenCodeAgentClient } from "./providers/opencode-agent.js";
 import { PiRpcAgentClient } from "./providers/pi/agent.js";
+import { PaseoAgentClient } from "./providers/paseo-agent/agent.js";
+import type { PaseoAgentConfig } from "./providers/paseo-agent/config.js";
 import { MockLoadTestAgentClient } from "./providers/mock-load-test-agent.js";
 import { MockSlowProviderClient } from "./providers/mock-slow-provider.js";
 import {
@@ -78,11 +80,16 @@ export interface BuildProviderRegistryOptions {
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   managedProcesses?: ManagedProcessRegistry;
   isDev?: boolean;
+  /**
+   * Opaque Paseo Agent config blob. The registry only forwards it to the
+   * paseo-agent client factory; it never reads the nested inference providers.
+   */
+  paseoAgentConfig?: PaseoAgentConfig;
 }
 
 interface ProviderClientFactoryOptions extends Pick<
   BuildProviderRegistryOptions,
-  "workspaceGitService" | "managedProcesses"
+  "workspaceGitService" | "managedProcesses" | "paseoAgentConfig"
 > {
   providerParams?: unknown;
   customProvider?: {
@@ -158,6 +165,11 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
         sessionDir: "~/.omp/agent/sessions",
       },
       commandsRpcType: "get_available_commands",
+    }),
+  paseo: (logger, _runtimeSettings, options) =>
+    new PaseoAgentClient({
+      logger,
+      config: options?.paseoAgentConfig ?? {},
     }),
   mock: (logger) => new MockLoadTestAgentClient(logger),
   "mock-slow": () => new MockSlowProviderClient(),
@@ -567,7 +579,10 @@ function createResolvedProviderClient(
 function buildResolvedBuiltinProviders(
   providerOverrides: Record<string, ProviderOverride>,
   runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
-  options: Pick<BuildProviderRegistryOptions, "workspaceGitService" | "managedProcesses">,
+  options: Pick<
+    BuildProviderRegistryOptions,
+    "workspaceGitService" | "managedProcesses" | "paseoAgentConfig"
+  >,
   isDev: boolean,
 ): Map<string, ResolvedProvider> {
   const resolvedProviders = new Map<string, ResolvedProvider>();
@@ -598,6 +613,7 @@ function buildResolvedBuiltinProviders(
           workspaceGitService: options.workspaceGitService,
           managedProcesses: options.managedProcesses,
           providerParams: override?.params,
+          paseoAgentConfig: options.paseoAgentConfig,
         }),
     });
   }
@@ -717,6 +733,7 @@ export function buildProviderRegistry(
     {
       workspaceGitService: options?.workspaceGitService,
       managedProcesses: options?.managedProcesses,
+      paseoAgentConfig: options?.paseoAgentConfig,
     },
     options?.isDev === true,
   );
