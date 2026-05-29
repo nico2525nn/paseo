@@ -78,6 +78,7 @@ export interface ProviderSnapshotManagerOptions {
   refreshTimeoutMs?: number;
   diagnosticTimeoutMs?: number;
   paseoAgentConfig?: PaseoAgentConfig;
+  paseoHome?: string;
 }
 
 interface ProviderSnapshotRefreshOptions {
@@ -163,6 +164,7 @@ export class ProviderSnapshotManager {
   private readonly managedProcesses?: ManagedProcessRegistry;
   private readonly isDev: boolean;
   private readonly extraClients: Partial<Record<AgentProvider, AgentClient>>;
+  private readonly paseoHome: string | undefined;
   private runtimeSettings: AgentProviderRuntimeSettingsMap | undefined;
   private providerOverrides: Record<string, ProviderOverride> | undefined;
   private readonly baseProviderOverrides: Record<string, ProviderOverride> | undefined;
@@ -176,6 +178,7 @@ export class ProviderSnapshotManager {
     this.managedProcesses = options.managedProcesses;
     this.isDev = options.isDev === true;
     this.extraClients = options.extraClients ?? {};
+    this.paseoHome = options.paseoHome;
     this.runtimeSettings = options.runtimeSettings;
     this.providerOverrides = options.providerOverrides;
     this.baseProviderOverrides = options.providerOverrides;
@@ -422,6 +425,7 @@ export class ProviderSnapshotManager {
       managedProcesses: this.managedProcesses,
       isDev: this.isDev,
       paseoAgentConfig: this.paseoAgentConfig,
+      paseoHome: this.paseoHome,
     });
 
     for (const [provider, client] of Object.entries(this.extraClients) as Array<

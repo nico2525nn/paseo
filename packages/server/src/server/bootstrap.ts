@@ -742,6 +742,7 @@ export async function createPaseoDaemon(
     runtimeSettings: config.agentProviderSettings,
     providerOverrides: config.providerOverrides,
     paseoAgentConfig: config.paseoAgentConfig,
+    paseoHome: config.paseoHome,
     workspaceGitService,
     managedProcesses,
     isDev: config.isDev === true,

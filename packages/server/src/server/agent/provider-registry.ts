@@ -80,6 +80,7 @@ export interface BuildProviderRegistryOptions {
   workspaceGitService?: Pick<WorkspaceGitService, "resolveRepoRoot">;
   managedProcesses?: ManagedProcessRegistry;
   isDev?: boolean;
+  paseoHome?: string;
   /**
    * Opaque Paseo Agent config blob. The registry only forwards it to the
    * paseo-agent client factory; it never reads the nested inference providers.
@@ -89,7 +90,7 @@ export interface BuildProviderRegistryOptions {
 
 interface ProviderClientFactoryOptions extends Pick<
   BuildProviderRegistryOptions,
-  "workspaceGitService" | "managedProcesses" | "paseoAgentConfig"
+  "workspaceGitService" | "managedProcesses" | "paseoAgentConfig" | "paseoHome"
 > {
   providerParams?: unknown;
   customProvider?: {
@@ -170,6 +171,7 @@ const PROVIDER_CLIENT_FACTORIES: Record<string, ProviderClientFactory> = {
     new PaseoAgentClient({
       logger,
       config: options?.paseoAgentConfig ?? {},
+      paseoHome: options?.paseoHome,
     }),
   mock: (logger) => new MockLoadTestAgentClient(logger),
   "mock-slow": () => new MockSlowProviderClient(),
@@ -581,7 +583,7 @@ function buildResolvedBuiltinProviders(
   runtimeSettings: AgentProviderRuntimeSettingsMap | undefined,
   options: Pick<
     BuildProviderRegistryOptions,
-    "workspaceGitService" | "managedProcesses" | "paseoAgentConfig"
+    "workspaceGitService" | "managedProcesses" | "paseoAgentConfig" | "paseoHome"
   >,
   isDev: boolean,
 ): Map<string, ResolvedProvider> {
@@ -614,6 +616,7 @@ function buildResolvedBuiltinProviders(
           managedProcesses: options.managedProcesses,
           providerParams: override?.params,
           paseoAgentConfig: options.paseoAgentConfig,
+          paseoHome: options.paseoHome,
         }),
     });
   }
@@ -734,6 +737,7 @@ export function buildProviderRegistry(
       workspaceGitService: options?.workspaceGitService,
       managedProcesses: options?.managedProcesses,
       paseoAgentConfig: options?.paseoAgentConfig,
+      paseoHome: options?.paseoHome,
     },
     options?.isDev === true,
   );
