@@ -32,7 +32,7 @@ const { queryState, theme } = vi.hoisted(() => ({
   },
   theme: {
     spacing: { 1: 4, 2: 8, 3: 12, 4: 16 },
-    fontSize: { sm: 13 },
+    fontSize: { sm: 13, code: 13 },
     colors: {
       destructive: "#f43f5e",
       foreground: "#fff",
@@ -67,13 +67,17 @@ vi.mock("react-native", () => {
       children,
     );
   });
-  const MockText = ({
-    children,
-    style,
-  }: {
-    children?: React.ReactNode;
-    style?: React.CSSProperties;
-  }) => React.createElement("span", { style }, children);
+  const flattenMockStyle = (value: unknown): React.CSSProperties => {
+    if (Array.isArray(value)) {
+      return value.reduce<React.CSSProperties>(
+        (acc, item) => Object.assign(acc, flattenMockStyle(item)),
+        {},
+      );
+    }
+    return (value as React.CSSProperties | null | undefined) ?? {};
+  };
+  const MockText = ({ children, style }: { children?: React.ReactNode; style?: unknown }) =>
+    React.createElement("span", { style: flattenMockStyle(style) }, children);
   const MockPressable = ({
     children,
     disabled,
@@ -168,6 +172,10 @@ vi.mock("react-native-unistyles", () => ({
       typeof factory === "function" ? (factory as (t: typeof theme) => unknown)(theme) : factory,
   },
   useUnistyles: () => ({ theme }),
+}));
+
+vi.mock("@/styles/syntax-token-styles", () => ({
+  syntaxTokenStyleFor: () => ({ color: "#fff" }),
 }));
 
 vi.mock("@/attachments/use-attachment-preview-url", () => ({

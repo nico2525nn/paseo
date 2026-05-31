@@ -164,7 +164,16 @@ vi.mock("react-native", () => {
     });
   });
 
-  return { Pressable: MockPressable, Text: MockText, TextInput: MockTextInput, View: MockView };
+  return {
+    Platform: {
+      OS: "web",
+      select: (options: Record<string, unknown>) => options.web ?? options.default,
+    },
+    Pressable: MockPressable,
+    Text: MockText,
+    TextInput: MockTextInput,
+    View: MockView,
+  };
 });
 
 vi.mock("react-native-unistyles", () => ({

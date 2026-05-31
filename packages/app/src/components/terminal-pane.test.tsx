@@ -177,6 +177,10 @@ vi.mock("react-native", () => {
 
   return {
     ActivityIndicator: () => React.createElement("span", { "data-testid": "activity" }),
+    Platform: {
+      OS: "web",
+      select: (options: Record<string, unknown>) => options.web ?? options.default,
+    },
     Pressable: MockPressable,
     ScrollView: MockView,
     Text: MockText,
