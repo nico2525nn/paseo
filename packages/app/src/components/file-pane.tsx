@@ -238,7 +238,10 @@ interface CodeLineTokenProps {
 
 function CodeLineToken({ backgroundColor, style, text }: CodeLineTokenProps) {
   const tokenStyle = useMemo(
-    () => [style ? syntaxTokenStyleFor(style) : undefined, backgroundColor ? { backgroundColor } : null],
+    () => [
+      style ? syntaxTokenStyleFor(style) : undefined,
+      backgroundColor ? { backgroundColor } : null,
+    ],
     [backgroundColor, style],
   );
   return <Text style={tokenStyle}>{text}</Text>;
@@ -748,12 +751,11 @@ function FilePreviewBody({
   } else if (preview.kind === "text" && textRenderData) {
     content = (
       <FilePaneSearchableTextPreview
-        baseColor={baseColor}
-        colorMap={colorMap}
         currentMatchBackgroundColor={currentMatchBackgroundColor}
         gutterWidth={gutterWidth}
         isMarkdownFile={isMarkdownFile}
         isMobile={isMobile}
+        lineSelection={lineSelection}
         markdownParser={markdownParser}
         markdownStyles={markdownStyles}
         matchBackgroundColor={matchBackgroundColor}

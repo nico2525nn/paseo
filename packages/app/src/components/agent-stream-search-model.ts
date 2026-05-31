@@ -3,7 +3,7 @@ import {
   findMountedWindowStart,
   getWebMountedRecentStreamItems,
   getWebPartialVirtualizationThreshold,
-} from "./agent-stream-web-virtualization";
+} from "@/agent-stream/web-virtualization";
 
 type AgentStreamSearchSource = "historyVirtualized" | "historyMounted" | "liveHead";
 

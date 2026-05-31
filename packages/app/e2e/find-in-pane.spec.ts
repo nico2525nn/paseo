@@ -1,10 +1,7 @@
 import { expect, test, type Page } from "./fixtures";
 import { waitForTabBar } from "./helpers/launcher";
-import {
-  connectTerminalClient,
-  setupDeterministicPrompt,
-  waitForTerminalContent,
-} from "./helpers/terminal-perf";
+import { setupDeterministicPrompt, waitForTerminalContent } from "./helpers/terminal-perf";
+import { connectSeedClient } from "./helpers/seed-client";
 import { createTempGitRepo } from "./helpers/workspace";
 import { openFileExplorer, openFileFromExplorer } from "./helpers/file-explorer";
 import {
@@ -51,7 +48,7 @@ test.describe("in-pane find", () => {
     test.setTimeout(120_000);
 
     const client = await connectWorkspaceSetupClient();
-    const agentClient = await connectTerminalClient();
+    const agentClient = await connectSeedClient();
     const repo = await createTempGitRepo("find-pane-qa-", {
       files: [
         {

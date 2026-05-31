@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getNativeScrollToIndexFallbackOffset } from "./stream-strategy-native";
+import { getNativeScrollToIndexFallbackOffset } from "@/agent-stream/strategy-native";
 
 describe("getNativeScrollToIndexFallbackOffset", () => {
   it("approximates the offset for an unmeasured native FlatList row", () => {

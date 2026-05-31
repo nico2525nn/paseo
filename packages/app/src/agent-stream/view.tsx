@@ -63,7 +63,7 @@ import {
   buildAgentStreamSearchModel,
   findAgentStreamSearchMatches,
   type AgentStreamSearchMatch,
-} from "./agent-stream-search-model";
+} from "@/components/agent-stream-search-model";
 import {
   type BottomAnchorLocalRequest,
   type BottomAnchorRouteRequest,
@@ -87,11 +87,6 @@ import {
   type UsePaneFindResult,
   usePaneFind,
 } from "@/panels/pane-find";
-import {
-  getWorkingIndicatorDotStrength,
-  WORKING_INDICATOR_CYCLE_MS,
-  WORKING_INDICATOR_OFFSETS,
-} from "@/utils/working-indicator";
 import { isWeb } from "@/constants/platform";
 import type { Theme } from "@/styles/theme";
 
@@ -601,25 +596,6 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
         };
       });
     }, [searchModel]);
-    const inlineWorkingIndicatorItemId = useMemo(() => {
-      if (agent.status !== "running") {
-        return null;
-      }
-      const footerItem = baseRenderModel.segments.liveHead.find((item, index, items) => {
-        if (item.kind !== "assistant_message") {
-          return false;
-        }
-        return (
-          getStreamNeighborItem({
-            strategy: streamRenderStrategy,
-            items,
-            index,
-            relation: "below",
-          }) === undefined
-        );
-      });
-      return footerItem?.id ?? null;
-    }, [agent.status, baseRenderModel.segments.liveHead, streamRenderStrategy]);
     useImperativeHandle(
       ref,
       () => ({
@@ -699,7 +675,14 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
           </AssistantFileLinkResolverProvider>
         );
       },
-      [client, findHighlightsByItemId, handleInlinePathPress, resolvedServerId, toast, workspaceRoot],
+      [
+        client,
+        findHighlightsByItemId,
+        handleInlinePathPress,
+        resolvedServerId,
+        toast,
+        workspaceRoot,
+      ],
     );
 
     const renderThoughtItem = useCallback(
@@ -998,108 +981,8 @@ const AgentStreamViewComponent = forwardRef<AgentStreamViewHandle, AgentStreamVi
 export const AgentStreamView = memo(AgentStreamViewComponent);
 AgentStreamView.displayName = "AgentStreamView";
 
-function WorkingIndicator({ variant = "auxiliary" }: { variant?: "auxiliary" | "inline" }) {
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = 0;
-    progress.value = withRepeat(
-      withTiming(1, {
-        duration: WORKING_INDICATOR_CYCLE_MS,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-
-    return () => {
-      cancelAnimation(progress);
-      progress.value = 0;
-    };
-  }, [progress]);
-
-  const translateDistance = -2;
-  const dotOneStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[0]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotTwoStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[1]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotThreeStyle = useAnimatedStyle(() => {
-    const strength = getWorkingIndicatorDotStrength(progress.value, WORKING_INDICATOR_OFFSETS[2]);
-    return {
-      opacity: 0.3 + strength * 0.7,
-      transform: [{ translateY: strength * translateDistance }],
-    };
-  });
-
-  const dotOneCombinedStyle = useMemo(() => [stylesheet.workingDot, dotOneStyle], [dotOneStyle]);
-  const dotTwoCombinedStyle = useMemo(() => [stylesheet.workingDot, dotTwoStyle], [dotTwoStyle]);
-  const dotThreeCombinedStyle = useMemo(
-    () => [stylesheet.workingDot, dotThreeStyle],
-    [dotThreeStyle],
-  );
-
-  const containerStyle =
-    variant === "inline"
-      ? stylesheet.inlineWorkingIndicatorFrame
-      : stylesheet.workingIndicatorBubble;
-
-  return (
-    <View style={containerStyle}>
-      <View style={stylesheet.workingDotsRow}>
-        <Animated.View style={dotOneCombinedStyle} />
-        <Animated.View style={dotTwoCombinedStyle} />
-        <Animated.View style={dotThreeCombinedStyle} />
-      </View>
-    </View>
-  );
-}
-
-function InlineWorkingIndicatorSlot() {
-  return (
-    <View style={stylesheet.inlineTurnFooter} testID="turn-working-indicator">
-      <WorkingIndicator variant="inline" />
-    </View>
-  );
-}
-
 function AgentStreamFindBarSlot({ paneFind }: { paneFind: UsePaneFindResult }) {
   return paneFind.isOpen ? <FindBar {...paneFind.findBarProps} /> : null;
-}
-
-// Permission Request Card Component
-type TurnContentStrategy = Parameters<
-  typeof collectAssistantTurnContentForStreamRenderStrategy
->[0]["strategy"];
-
-interface TurnCopyButtonSlotProps {
-  strategy: TurnContentStrategy;
-  items: StreamItem[];
-  startIndex: number;
-}
-
-function TurnCopyButtonSlot({ strategy, items, startIndex }: TurnCopyButtonSlotProps) {
-  const getContent = useCallback(
-    () =>
-      collectAssistantTurnContentForStreamRenderStrategy({
-        strategy,
-        items,
-        startIndex,
-      }),
-    [strategy, items, startIndex],
-  );
-  return <TurnCopyButton getContent={getContent} />;
 }
 
 interface ToolCallSlotProps extends Omit<

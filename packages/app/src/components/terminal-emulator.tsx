@@ -312,18 +312,6 @@ export default function TerminalEmulator({
       blur: () => {
         runtimeRef.current?.blur();
       },
-      findNext: (input: { query: string }) => {
-        return runtimeRef.current?.findNext(input) ?? false;
-      },
-      findPrevious: (input: { query: string }) => {
-        return runtimeRef.current?.findPrevious(input) ?? false;
-      },
-      clearFindDecorations: () => {
-        runtimeRef.current?.clearFindDecorations();
-      },
-      onFindResultsChanged: (listener: (event: TerminalFindResultChangeEvent) => void) => {
-        return runtimeRef.current?.onFindResultsChanged(listener) ?? (() => {});
-      },
     }),
     [],
   );

@@ -222,6 +222,7 @@ const harnessPaneContext: PaneContextValue = {
   closeCurrentTab: () => {},
   retargetCurrentTab: () => {},
   openFileInWorkspace: () => {},
+  openImportSheet: () => {},
 };
 const harnessPaneFocus = createPaneFocusContextValue({
   isPaneFocused: true,
@@ -451,6 +452,7 @@ describe("FindBar", () => {
       onCloseCurrentTab: vi.fn(),
       onRetargetCurrentTab: vi.fn(),
       onOpenWorkspaceFile: vi.fn(),
+      onOpenImportSheet: vi.fn(),
     });
 
     const rightContent = buildWorkspacePaneContentModel({
@@ -462,6 +464,7 @@ describe("FindBar", () => {
       onCloseCurrentTab: vi.fn(),
       onRetargetCurrentTab: vi.fn(),
       onOpenWorkspaceFile: vi.fn(),
+      onOpenImportSheet: vi.fn(),
     });
     const focusLeft = vi.fn();
     const focusRight = vi.fn();

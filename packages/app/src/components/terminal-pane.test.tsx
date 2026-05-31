@@ -28,8 +28,10 @@ const { client, findListeners, terminalProps, theme, terminalHandle, resetTermin
     const listeners: Array<(event: FindResultChange) => void> = [];
     const handle = {
       writeOutput: vi.fn(),
+      restoreOutput: vi.fn(),
       renderSnapshot: vi.fn(),
       clear: vi.fn(),
+      blur: vi.fn(),
       findNext: vi.fn(() => true),
       findPrevious: vi.fn(() => true),
       clearFindDecorations: vi.fn(),
@@ -278,6 +280,7 @@ const paneContext: PaneContextValue = {
   closeCurrentTab: () => {},
   retargetCurrentTab: () => {},
   openFileInWorkspace: () => {},
+  openImportSheet: () => {},
 };
 const paneFocus = createPaneFocusContextValue({
   isPaneFocused: true,
@@ -323,6 +326,7 @@ function renderTerminalPane(): void {
             isWorkspaceFocused
             isPaneFocused
             onOpenFileExplorer={vi.fn()}
+            onOpenWorkspaceFile={vi.fn()}
           />
         </PaneFocusProvider>
       </PaneProvider>,

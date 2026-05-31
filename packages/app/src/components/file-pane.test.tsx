@@ -216,6 +216,7 @@ const paneContext: PaneContextValue = {
   closeCurrentTab: () => {},
   retargetCurrentTab: () => {},
   openFileInWorkspace: () => {},
+  openImportSheet: () => {},
 };
 const paneFocus = createPaneFocusContextValue({
   isPaneFocused: true,
@@ -248,12 +249,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderFilePane(filePath = "src/example.ts") {
+function renderFilePane(location: { path: string } = { path: "src/example.ts" }) {
   act(() => {
     root?.render(
       <PaneProvider value={paneContext}>
         <PaneFocusProvider value={paneFocus}>
-          <FilePane serverId="server" workspaceRoot="/repo" filePath={filePath} />
+          <FilePane serverId="server" workspaceRoot="/repo" location={location} />
         </PaneFocusProvider>
       </PaneProvider>,
     );
@@ -325,7 +326,7 @@ describe("FilePane preview rendering", () => {
       isFetching: false,
     };
 
-    renderFilePane("README.md");
+    renderFilePane({ path: "README.md" });
 
     expect(container?.querySelector('[data-testid="markdown-preview"]')?.textContent).toBe(
       "# Guide",
@@ -342,7 +343,7 @@ describe("FilePane preview rendering", () => {
       isFetching: false,
     };
 
-    renderFilePane("logo.png");
+    renderFilePane({ path: "logo.png" });
 
     expect(container?.querySelector("img")?.getAttribute("src")).toBe("blob:preview");
   });
@@ -362,7 +363,7 @@ describe("FilePane preview rendering", () => {
       isFetching: false,
     };
 
-    renderFilePane("tool");
+    renderFilePane({ path: "tool" });
 
     expect(container?.textContent).toContain("Binary preview unavailable");
     expect(container?.textContent).toContain("2.0 KB");

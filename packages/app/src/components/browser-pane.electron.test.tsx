@@ -236,6 +236,7 @@ const paneContextValue: PaneContextValue = {
   closeCurrentTab: vi.fn(),
   retargetCurrentTab: vi.fn(),
   openFileInWorkspace: vi.fn(),
+  openImportSheet: vi.fn(),
 };
 
 function installWebviewElementFactory(): void {
