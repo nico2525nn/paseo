@@ -23,6 +23,19 @@ interface FindResultChange {
   resultCount: number;
 }
 
+interface TerminalKeyInput {
+  key: string;
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+  meta: boolean;
+}
+
+interface MockTerminalEmulatorProps {
+  testId?: string;
+  onTerminalKey?: (input: TerminalKeyInput) => Promise<void> | void;
+}
+
 const { client, findListeners, terminalProps, theme, terminalHandle, resetTerminalHandle } =
   vi.hoisted(() => {
     const listeners: Array<(event: FindResultChange) => void> = [];
@@ -52,15 +65,7 @@ const { client, findListeners, terminalProps, theme, terminalHandle, resetTermin
       },
       findListeners: listeners,
       terminalProps: {
-        current: null as null | {
-          onTerminalKey?: (input: {
-            key: string;
-            ctrl: boolean;
-            shift: boolean;
-            alt: boolean;
-            meta: boolean;
-          }) => Promise<void> | void;
-        },
+        current: null as null | MockTerminalEmulatorProps,
       },
       terminalHandle: handle,
       resetTerminalHandle: () => {
@@ -203,7 +208,9 @@ vi.mock("react-native-unistyles", () => ({
     absoluteFillObject: {},
     hairlineWidth: 1,
     create: (factory: unknown) =>
-      typeof factory === "function" ? (factory as (t: typeof theme) => unknown)(theme) : factory,
+      Object.prototype.toString.call(factory) === "[object Function]"
+        ? (factory as (value: unknown) => unknown)(theme)
+        : factory,
   },
   useUnistyles: () => ({ theme }),
 }));
@@ -236,6 +243,10 @@ vi.mock("@/hooks/use-keyboard-shift-style", () => ({
   }),
 }));
 
+vi.mock("@/hooks/use-settings", () => ({
+  useAppSettings: () => ({ settings: { terminalScrollbackLines: 1000 } }),
+}));
+
 vi.mock("@/constants/layout", () => ({
   useIsCompactFormFactor: () => false,
 }));
@@ -264,9 +275,9 @@ vi.mock("@/terminal/runtime/terminal-stream-controller", () => ({
 }));
 
 vi.mock("@/components/terminal-emulator", () => ({
-  default: React.forwardRef<TerminalEmulatorHandle, { testId?: string; onTerminalKey?: unknown }>(
+  default: React.forwardRef<TerminalEmulatorHandle, MockTerminalEmulatorProps>(
     function TerminalEmulator(props, ref) {
-      terminalProps.current = props as typeof terminalProps.current;
+      terminalProps.current = props;
       useImperativeHandle(ref, () => terminalHandle);
       return React.createElement("div", { "data-testid": props.testId ?? "terminal-surface" });
     },
