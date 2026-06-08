@@ -5,10 +5,6 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2023", "DOM"],
     "paths": {
-      "@anthropic-ai/claude-agent-sdk": [
-        "./src/server/agent/providers/claude/claude-agent-sdk-types.ts"
-      ],
-      "@modelcontextprotocol/sdk/server/mcp.js": ["./src/server/agent/mcp-sdk-types.ts"],
       "@server/*": ["./src/*"]
     },
     "skipLibCheck": true,
