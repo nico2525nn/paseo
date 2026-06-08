@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod3";
 import type { Logger } from "pino";
 
 import type { AgentManager } from "./agent-manager.js";

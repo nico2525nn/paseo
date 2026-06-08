@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod3";
 
 export type SherpaOnnxModelKind = "stt-offline" | "tts";
 

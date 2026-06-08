@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 
 import type { Logger } from "pino";
-import { z } from "zod";
+import { z } from "zod3";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
 import type { PersistedProjectKind, PersistedWorkspaceKind } from "./workspace-registry-model.js";

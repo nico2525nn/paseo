@@ -1,5 +1,5 @@
 import pino from "pino";
-import { z } from "zod";
+import { z } from "zod3";
 import { describe, expect, test } from "vitest";
 
 import { CLIENT_CAPS } from "@getpaseo/protocol/client-capabilities";
