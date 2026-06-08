@@ -17,10 +17,17 @@ export const ScheduleCadenceSchema = z.discriminatedUnion("type", [
 ]);
 export type ScheduleCadence = z.infer<typeof ScheduleCadenceSchema>;
 
+const LegacyUuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    "Invalid UUID",
+  );
+
 export const ScheduleTargetSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("agent"),
-    agentId: z.string().uuid(),
+    agentId: LegacyUuidSchema,
   }),
   z.object({
     type: z.literal("new-agent"),
@@ -56,7 +63,7 @@ export const ScheduleRunSchema = z.object({
   startedAt: z.string(),
   endedAt: z.string().nullable(),
   status: z.enum(["running", "succeeded", "failed"]),
-  agentId: z.string().uuid().nullable(),
+  agentId: LegacyUuidSchema.nullable(),
   output: z.string().nullable(),
   error: z.string().nullable(),
 });
