@@ -546,9 +546,23 @@ export interface AgentSessionConfig {
   internal?: boolean;
 }
 
+export interface PaseoToolingProviderSessionRef {
+  provider: AgentProvider;
+  sessionId: string;
+}
+
+export interface PaseoToolingLaunchContext {
+  agentId: string;
+  mcpUrl: string | null;
+  httpBaseUrl: string | null;
+  token: string;
+  bindProviderSession(ref: PaseoToolingProviderSessionRef): () => void;
+}
+
 export interface AgentLaunchContext {
   agentId?: string;
   env?: Record<string, string>;
+  paseoTooling?: PaseoToolingLaunchContext;
 }
 
 export interface AgentCreateSessionOptions {
