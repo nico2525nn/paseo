@@ -1,6 +1,7 @@
 import type pino from "pino";
 import { OpenAI } from "openai";
 import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import type { SpeechStreamResult, TextToSpeechProvider } from "../../speech-provider.js";
 
 export type { SpeechStreamResult };
@@ -65,7 +66,11 @@ export class OpenAITTS implements TextToSpeechProvider {
           | "pcm",
       });
 
-      const audioStream = response.body as unknown as Readable;
+      if (!response.body) {
+        throw new Error("OpenAI speech response did not include an audio stream");
+      }
+
+      const audioStream = Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>);
 
       const duration = Date.now() - startTime;
       this.logger.debug({ duration }, "Speech synthesis stream ready");
