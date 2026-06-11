@@ -329,6 +329,10 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "defaultProfile": {
+                  "type": "string",
+                  "minLength": 1
+                },
                 "providers": {
                   "type": "object",
                   "additionalProperties": {
