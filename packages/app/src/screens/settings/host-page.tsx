@@ -54,6 +54,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
+import type { DaemonUpdateProgressStatusPayload } from "@getpaseo/protocol/messages";
 import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
 import { resolveAppVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
@@ -723,6 +724,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [progressPhase, setProgressPhase] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
   const daemonVersion = useSessionStore(
     (state) => state.sessions[host.serverId]?.serverInfo?.version ?? null,
@@ -737,6 +739,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      unsubscribeRef.current?.();
     };
   }, []);
 
@@ -810,7 +813,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           if (event.type !== "status") return;
           if (event.payload.status !== "daemon_update_progress") return;
           if (!isMountedRef.current) return;
-          const phase = (event.payload as { phase?: string }).phase;
+          const phase = (event.payload as DaemonUpdateProgressStatusPayload).phase;
           if (phase === "starting")
             setProgressPhase(t("settings.host.daemon.update.phaseStarting"));
           else if (phase === "downloading")
@@ -820,10 +823,12 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           else if (phase === "complete")
             setProgressPhase(t("settings.host.daemon.update.phaseComplete"));
         });
+        unsubscribeRef.current = unsubscribe;
 
         void daemonClient
           .updateDaemon(`settings_daemon_update_${host.serverId}`)
           .then((response) => {
+            unsubscribeRef.current = null;
             unsubscribe();
             if (!response.success) {
               if (!isMountedRef.current) return undefined;
@@ -842,6 +847,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
             return undefined;
           })
           .catch((error) => {
+            unsubscribeRef.current = null;
             unsubscribe();
             console.error(`[HostPage] Failed to update daemon ${host.label}`, error);
             if (!isMountedRef.current) return;
