@@ -382,6 +382,9 @@ class SessionRequestError extends Error {
   }
 }
 
+// Global guard — only one daemon update can run at a time across all sessions.
+let daemonUpdateInProgress = false;
+
 export interface SessionFileSystem {
   isDirectory(path: string): Promise<boolean>;
 }
@@ -586,7 +589,6 @@ export class Session {
   private readonly daemonSession: DaemonSession;
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
-  private daemonUpdateInProgress = false;
 
   constructor(options: SessionOptions) {
     const {
@@ -1784,7 +1786,7 @@ export class Session {
   private async handleDaemonUpdateRequest(
     msg: Extract<SessionInboundMessage, { type: "daemon.update.request" }>,
   ): Promise<void> {
-    if (this.daemonUpdateInProgress) {
+    if (daemonUpdateInProgress) {
       this.emit({
         type: "rpc_error",
         payload: {
@@ -1797,7 +1799,7 @@ export class Session {
       return;
     }
 
-    this.daemonUpdateInProgress = true;
+    daemonUpdateInProgress = true;
     const previousVersion = this.daemonVersion ?? null;
 
     const emitProgress = (phase: "starting" | "downloading" | "installing" | "complete") => {
@@ -1839,16 +1841,17 @@ export class Session {
 
       if (!npmVersionOk) {
         emitResponse(false, "npm is not available on this system", null);
-        this.daemonUpdateInProgress = false;
+        daemonUpdateInProgress = false;
         return;
       }
 
       emitProgress("downloading");
 
-      // Run npm update -g @getpaseo/cli
+      // Install latest version globally — npm install -g @getpaseo/cli@latest
+      // is more reliable than npm update -g, especially across major versions.
       const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
         (fulfill) => {
-          const proc = spawn("npm", ["update", "-g", "@getpaseo/cli"], {
+          const proc = spawn("npm", ["install", "-g", "@getpaseo/cli@latest"], {
             stdio: ["ignore", "pipe", "pipe"],
             timeout: 300_000, // 5 minutes
           });
@@ -1877,7 +1880,7 @@ export class Session {
           "Daemon update failed",
         );
         emitResponse(false, errorMsg, null);
-        this.daemonUpdateInProgress = false;
+        daemonUpdateInProgress = false;
         return;
       }
 
@@ -1904,7 +1907,7 @@ export class Session {
       this.sessionLogger.error({ err: error }, "Daemon update failed with exception");
       emitResponse(false, error instanceof Error ? error.message : "Unknown error", null);
     } finally {
-      this.daemonUpdateInProgress = false;
+      daemonUpdateInProgress = false;
     }
   }
 
