@@ -120,7 +120,7 @@ const PaseoAgentProviderOptionsSchema = z
     baseUrl: z.string().url().optional(),
     // Override the wire api. Required for `custom`; optional elsewhere.
     api: z.string().min(1).optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     // Advanced: send `Authorization: Bearer <apiKey>` as a header. Only needed for
     // endpoints whose wire api doesn't already attach the key.
     authHeader: z.boolean().optional(),
@@ -169,7 +169,7 @@ export const PaseoAgentConfigSchema = z
     defaultProfile: z.string().min(1).optional(),
     // Inference providers keyed by instance name. Multiple entries may share a
     // type while pointing at different APIs/base URLs/models.
-    providers: z.record(PaseoAgentInferenceProviderSchema).optional(),
+    providers: z.record(z.string(), PaseoAgentInferenceProviderSchema).optional(),
   })
   .strict();
 
