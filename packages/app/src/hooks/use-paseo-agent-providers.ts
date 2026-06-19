@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import type {
   PaseoAgentSetProviderRequest,
   RedactedPaseoAgentProviderConfig,
@@ -33,9 +34,12 @@ interface UsePaseoAgentProvidersResult {
 }
 
 export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentProvidersResult {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const client = useHostRuntimeClient(serverId ?? "");
   const isConnected = useHostRuntimeIsConnected(serverId ?? "");
+  const hostDisconnectedMessage = t("workspace.terminal.hostDisconnected");
+  const saveProviderFailedMessage = t("settings.host.providers.addErrorTitle");
   // COMPAT(paseoAgentConfig): added in v0.1.85, remove gate after 2026-11-30.
   const supported = useSessionStore(
     (state) => state.sessions[serverId ?? ""]?.serverInfo?.features?.paseoAgentConfig === true,
@@ -48,7 +52,7 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
     staleTime: 30_000,
     queryFn: async () => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(hostDisconnectedMessage);
       }
       return client.getPaseoAgentProviders();
     },
@@ -63,11 +67,11 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
   const setProviderMutation = useMutation({
     mutationFn: async (input: PaseoAgentSetProviderInput) => {
       if (!client) {
-        throw new Error("Host is not connected");
+        throw new Error(hostDisconnectedMessage);
       }
       const result = await client.setPaseoAgentProvider(input);
       if (!result.success) {
-        throw new Error(result.error ?? "Failed to save provider");
+        throw new Error(result.error ?? saveProviderFailedMessage);
       }
       return result.provider;
     },
