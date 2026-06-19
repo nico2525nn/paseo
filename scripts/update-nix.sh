@@ -35,7 +35,7 @@ NIXPKGS_URL="$(node -p "
 STDERR_LOG="$(mktemp)"
 trap "rm -f '$STDERR_LOG'" EXIT
 
-if ! NEW_HASH="$(nix shell "${NIXPKGS_URL}#prefetch-npm-deps" -c prefetch-npm-deps "$LOCK_FILE" 2>"$STDERR_LOG")"; then
+if ! NEW_HASH="$(NIX_NPM_FETCHER_VERSION=2 nix shell "${NIXPKGS_URL}#prefetch-npm-deps" -c prefetch-npm-deps "$LOCK_FILE" 2>"$STDERR_LOG")"; then
   echo "ERROR: prefetch-npm-deps failed:" >&2
   tail -20 "$STDERR_LOG" >&2
   exit 1
