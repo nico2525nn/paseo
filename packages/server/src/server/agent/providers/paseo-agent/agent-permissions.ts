@@ -12,34 +12,50 @@ export const ToolPermissionRuleSchema = z
 export type ToolPermissionAction = z.infer<typeof ToolPermissionActionSchema>;
 export type ToolPermissionRule = z.infer<typeof ToolPermissionRuleSchema>;
 
+export interface CompiledToolPermissionRule {
+  rule: ToolPermissionRule;
+  matches(toolName: string): boolean;
+}
+
 export interface ToolPermissionPolicy {
   rules: ToolPermissionRule[];
+  compiledRules: CompiledToolPermissionRule[];
 }
 
 export function createToolPermissionPolicy(
   rules: ToolPermissionRule[] | undefined,
 ): ToolPermissionPolicy {
-  return { rules: rules ?? [] };
+  const normalizedRules = rules ?? [];
+  return {
+    rules: normalizedRules,
+    compiledRules: normalizedRules.map((rule) => ({
+      rule,
+      matches: compileToolPattern(rule.tool),
+    })),
+  };
 }
 
 export function evaluateToolPermission(
   policy: ToolPermissionPolicy | undefined,
   toolName: string,
 ): ToolPermissionAction {
-  for (const rule of policy?.rules ?? []) {
-    if (matchesToolPattern(rule.tool, toolName)) {
-      return rule.action;
+  for (const compiled of policy?.compiledRules ?? []) {
+    if (compiled.matches(toolName)) {
+      return compiled.rule.action;
     }
   }
   return "allow";
 }
 
-function matchesToolPattern(pattern: string, toolName: string): boolean {
-  if (pattern === toolName || pattern === "*") {
-    return true;
+function compileToolPattern(pattern: string): (toolName: string) => boolean {
+  if (pattern === "*") {
+    return () => true;
+  }
+  if (!pattern.includes("*")) {
+    return (toolName) => toolName === pattern;
   }
   const matcher = new RegExp(`^${wildcardPatternToRegExp(pattern)}$`);
-  return matcher.test(toolName);
+  return (toolName) => matcher.test(toolName);
 }
 
 function wildcardPatternToRegExp(pattern: string): string {
