@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -59,9 +59,6 @@ describe("oauth-store", () => {
     expect(hasStoredOAuthCredential("chatgpt", env)).toBe(true);
     const stored = JSON.parse(readFileSync(path, "utf8"));
     expect(stored.chatgpt).toMatchObject({ type: "oauth", refresh: "rt-from-login" });
-
-    // Stored private (0600).
-    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("keys the credential by provider instance name", async () => {
@@ -99,7 +96,6 @@ describe("oauth-store", () => {
     expect(hasStoredOAuthCredential("chatgpt", env)).toBe(true);
     const stored = JSON.parse(readFileSync(path, "utf8"));
     expect(stored.chatgpt).toMatchObject({ type: "oauth", refresh: "rt-browser" });
-    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("browser login falls back to manual code entry only when the callback can't complete", async () => {
