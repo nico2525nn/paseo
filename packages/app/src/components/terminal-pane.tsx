@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Clipboard from "expo-clipboard";
 import {
   ActivityIndicator,
   Pressable,
@@ -8,8 +9,12 @@ import {
 } from "react-native";
 import Animated, { runOnJS, useAnimatedReaction } from "react-native-reanimated";
 import { StyleSheet, useUnistyles } from "react-native-unistyles";
-import { encodeTerminalKeyInput } from "@getpaseo/protocol/terminal-key-input";
-import type { TerminalInputModeState } from "@getpaseo/protocol/terminal-input-mode";
+import { Keyboard as KeyboardIcon, KeyboardOff as KeyboardOffIcon } from "lucide-react-native";
+import type { TerminalKeyInput } from "@getpaseo/protocol/terminal-key-input";
+import {
+  DEFAULT_TERMINAL_INPUT_MODE_STATE,
+  type TerminalInputModeState,
+} from "@getpaseo/protocol/terminal-input-mode";
 import { useTranslation } from "react-i18next";
 import { useHostRuntimeClient, useHostRuntimeIsConnected } from "@/runtime/host-runtime";
 import { useKeyboardShiftStyle } from "@/hooks/use-keyboard-shift-style";
@@ -17,9 +22,22 @@ import { useAppVisible } from "@/hooks/use-app-visible";
 import { useStableEvent } from "@/hooks/use-stable-event";
 import {
   hasPendingTerminalModifiers,
-  normalizeTerminalTransportKey,
   resolvePendingModifierDataInput,
 } from "@/utils/terminal-keys";
+import {
+  createTerminalKeyInput,
+  dispatchTerminalKeyInput,
+  EMPTY_TERMINAL_KEY_MODIFIERS,
+  type TerminalKeyModifierState,
+} from "@/terminal/runtime/terminal-key-dispatch";
+import {
+  getTerminalVirtualKeyboardControlId,
+  shouldShowTerminalFloatingCopyAction,
+  shouldShowTerminalPasteAction,
+  TERMINAL_VIRTUAL_KEYBOARD_ROWS,
+  type TerminalVirtualKeyboardControl,
+} from "@/terminal/runtime/terminal-virtual-keyboard";
+import { pasteTerminalClipboard } from "@/terminal/runtime/terminal-paste";
 import { getWorkspaceTerminalSession } from "@/terminal/runtime/workspace-terminal-session";
 import {
   TerminalStreamController,
@@ -30,7 +48,9 @@ import { usePanelStore } from "@/stores/panel-store";
 import { useSessionStore } from "@/stores/session-store";
 import { toXtermTheme } from "@/utils/to-xterm-theme";
 import TerminalEmulator, { type TerminalEmulatorHandle } from "./terminal-emulator";
+import { TerminalFloatingCopyAction, TerminalPasteAction } from "./terminal-copy-paste-actions";
 import { useIsCompactFormFactor } from "@/constants/layout";
+import { isNative } from "@/constants/platform";
 import {
   applyTerminalRendererReadyChange,
   shouldReplayTerminalSnapshotForRenderer,
@@ -67,23 +87,9 @@ const MODIFIER_LABELS = {
   alt: "Alt",
 } as const;
 
-const KEY_BUTTONS = {
-  esc: { id: "esc", label: "Esc", key: "Escape" },
-  tab: { id: "tab", label: "Tab", key: "Tab" },
-  up: { id: "up", label: "↑", key: "ArrowUp" },
-  down: { id: "down", label: "↓", key: "ArrowDown" },
-  left: { id: "left", label: "←", key: "ArrowLeft" },
-  right: { id: "right", label: "→", key: "ArrowRight" },
-  enter: { id: "enter", label: "Enter", key: "Enter" },
-  backspace: { id: "backspace", label: "⌫", key: "Backspace" },
-  space: { id: "space", label: "Space", key: " " },
-} as const;
+const EMPTY_MODIFIERS = EMPTY_TERMINAL_KEY_MODIFIERS;
 
-interface ModifierState {
-  ctrl: boolean;
-  shift: boolean;
-  alt: boolean;
-}
+type ModifierState = TerminalKeyModifierState;
 
 type PendingTerminalInput =
   | {
@@ -92,20 +98,8 @@ type PendingTerminalInput =
     }
   | {
       type: "key";
-      input: {
-        key: string;
-        ctrl: boolean;
-        shift: boolean;
-        alt: boolean;
-        meta?: boolean;
-      };
+      input: TerminalKeyInput;
     };
-
-const EMPTY_MODIFIERS: ModifierState = {
-  ctrl: false,
-  shift: false,
-  alt: false,
-};
 
 function terminalScopeKey(input: { serverId: string; cwd: string }): string {
   return `${input.serverId}:${input.cwd}`;
@@ -161,6 +155,40 @@ function VirtualKeyButton({ id, label, keyValue, onSend }: VirtualKeyButtonProps
   );
 }
 
+interface KeyboardToggleButtonProps {
+  isKeyboardVisible: boolean;
+  iconColor: string;
+  onToggle: () => void;
+}
+
+function KeyboardToggleButton({
+  isKeyboardVisible,
+  iconColor,
+  onToggle,
+}: KeyboardToggleButtonProps) {
+  const label = isKeyboardVisible ? "Hide keyboard" : "Show keyboard";
+  const Icon = isKeyboardVisible ? KeyboardOffIcon : KeyboardIcon;
+  const pressableStyle = useCallback(
+    ({ hovered, pressed }: PressableStateCallbackType & { hovered?: boolean }) => [
+      styles.keyButton,
+      (Boolean(hovered) || pressed) && styles.keyButtonHovered,
+    ],
+    [],
+  );
+
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      testID="terminal-keyboard-toggle"
+      onPress={onToggle}
+      style={pressableStyle}
+    >
+      <Icon color={iconColor} size={16} />
+    </Pressable>
+  );
+}
+
 export function TerminalPane({
   serverId,
   cwd,
@@ -182,11 +210,12 @@ export function TerminalPane({
   const isMobile = useIsCompactFormFactor();
   const mobileView = usePanelStore((state) => state.mobileView);
   const showMobileAgentList = usePanelStore((state) => state.showMobileAgentList);
-  const swipeGesturesEnabled = isMobile && mobileView === "agent";
+  const swipeGesturesEnabled = isMobile;
   const { shift: keyboardShift, style: keyboardPaddingStyle } = useKeyboardShiftStyle({
     mode: "padding",
     enabled: isMobile,
   });
+  const [keyboardInset, setKeyboardInset] = useState(0);
 
   const client = useHostRuntimeClient(serverId);
   const isConnected = useHostRuntimeIsConnected(serverId);
@@ -210,14 +239,14 @@ export function TerminalPane({
   const [streamError, setStreamError] = useState<string | null>(null);
   const [rendererReadyStreamKey, setRendererReadyStreamKey] = useState<string | null>(null);
   const [modifiers, setModifiers] = useState<ModifierState>(EMPTY_MODIFIERS);
+  const [hasSelection, setHasSelection] = useState(false);
+  const [hasClipboardText, setHasClipboardText] = useState(false);
+  const [isKeyboardToggleVisible, setIsKeyboardToggleVisible] = useState(false);
   const [focusRequestToken, setFocusRequestToken] = useState(0);
   const [resizeRequestToken, setResizeRequestToken] = useState(0);
   const emulatorRef = useRef<TerminalEmulatorHandle>(null);
   const terminalIdRef = useRef<string>(terminalId);
-  const inputModeRef = useRef<TerminalInputModeState>({
-    kittyKeyboardFlags: 0,
-    win32InputMode: false,
-  });
+  const inputModeRef = useRef<TerminalInputModeState>(DEFAULT_TERMINAL_INPUT_MODE_STATE);
   const pendingTerminalInputRef = useRef<PendingTerminalInput[]>([]);
   const keyboardRefitTimeoutsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const lastAutoFocusKeyRef = useRef<string | null>(null);
@@ -226,11 +255,38 @@ export function TerminalPane({
 
   useEffect(() => {
     terminalIdRef.current = terminalId;
-    inputModeRef.current = {
-      kittyKeyboardFlags: 0,
-      win32InputMode: false,
-    };
+    inputModeRef.current = DEFAULT_TERMINAL_INPUT_MODE_STATE;
+    setHasSelection(false);
   }, [terminalId]);
+
+  const refreshClipboardAvailability = useCallback(async () => {
+    if (!isMobile) {
+      setHasClipboardText(false);
+      return;
+    }
+    try {
+      const hasText = await Clipboard.hasStringAsync();
+      setHasClipboardText(hasText);
+    } catch {
+      setHasClipboardText(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    void refreshClipboardAvailability();
+  }, [refreshClipboardAvailability, isAppVisible]);
+
+  useEffect(() => {
+    void refreshClipboardAvailability();
+  }, [keyboardInset, refreshClipboardAvailability]);
+
+  useEffect(() => {
+    setIsKeyboardToggleVisible(keyboardInset > 0);
+  }, [keyboardInset]);
+
+  const handleSelectionChange = useCallback((nextHasSelection: boolean) => {
+    setHasSelection(nextHasSelection);
+  }, []);
 
   const requestTerminalFocus = useCallback(() => {
     setFocusRequestToken((current) => current + 1);
@@ -332,19 +388,27 @@ export function TerminalPane({
     );
   }, [clearKeyboardRefitTimeouts, requestTerminalReflow]);
 
+  const handleKeyboardInsetChange = useCallback(
+    (nextInset: number) => {
+      setKeyboardInset(nextInset);
+      pulseKeyboardRefits();
+    },
+    [pulseKeyboardRefits],
+  );
+
   useEffect(() => {
     return () => clearKeyboardRefitTimeouts();
   }, [clearKeyboardRefitTimeouts]);
 
   useAnimatedReaction(
-    () => isMobile && keyboardShift.value > 0,
+    () => (isMobile ? Math.round(keyboardShift.value) : 0),
     (next, prev) => {
       if (next === prev) {
         return;
       }
-      runOnJS(pulseKeyboardRefits)();
+      runOnJS(handleKeyboardInsetChange)(next);
     },
-    [isMobile, pulseKeyboardRefits],
+    [isMobile, handleKeyboardInsetChange],
   );
 
   useEffect(() => {
@@ -480,15 +544,14 @@ export function TerminalPane({
         return true;
       }
 
-      const encoded = encodeTerminalKeyInput(entry.input, {
+      dispatchTerminalKeyInput({
+        keyInput: entry.input,
         inputMode: inputModeRef.current,
-      });
-      if (encoded.length === 0) {
-        return true;
-      }
-      client.sendTerminalInput(currentTerminalId, {
-        type: "input",
-        data: encoded,
+        sendData: (data) =>
+          client.sendTerminalInput(currentTerminalId, {
+            type: "input",
+            data,
+          }),
       });
       return true;
     },
@@ -540,26 +603,31 @@ export function TerminalPane({
         enqueuePendingTerminalInput({
           type: "key",
           input: {
-            key: normalizeTerminalTransportKey(input.key),
-            ctrl: input.ctrl,
-            shift: input.shift,
-            alt: input.alt,
-            meta: input.meta,
+            ...createTerminalKeyInput({
+              key: input.key,
+              modifiers: {
+                ctrl: input.ctrl,
+                shift: input.shift,
+                alt: input.alt,
+              },
+              meta: input.meta,
+            }),
           },
         });
         return true;
       }
 
-      const normalizedKey = normalizeTerminalTransportKey(input.key);
       const pendingEntry: PendingTerminalInput = {
         type: "key",
-        input: {
-          key: normalizedKey,
-          ctrl: input.ctrl,
-          shift: input.shift,
-          alt: input.alt,
+        input: createTerminalKeyInput({
+          key: input.key,
+          modifiers: {
+            ctrl: input.ctrl,
+            shift: input.shift,
+            alt: input.alt,
+          },
           meta: input.meta,
-        },
+        }),
       };
       if (!dispatchTerminalInputEntry(pendingEntry)) {
         enqueuePendingTerminalInput(pendingEntry);
@@ -626,7 +694,7 @@ export function TerminalPane({
   );
 
   const handleTerminalResize = useStableEvent(
-    (input: { rows: number; cols: number; shouldClaim: boolean }) => {
+    (input: { rows: number; cols: number; shouldClaim: boolean; forceClaim?: boolean }) => {
       const { rows, cols } = input;
       if (rows <= 0 || cols <= 0) {
         return;
@@ -640,6 +708,7 @@ export function TerminalPane({
       }
       const previousSent = lastSentTerminalSizeRef.current;
       if (
+        !input.forceClaim &&
         previousSent &&
         previousSent.rows === normalizedRows &&
         previousSent.cols === normalizedCols
@@ -665,6 +734,38 @@ export function TerminalPane({
   const handlePendingModifiersConsumed = useCallback(() => {
     clearPendingModifiers();
   }, [clearPendingModifiers]);
+
+  const handleTerminalPaste = useCallback(() => {
+    requestTerminalReflow();
+    void pasteTerminalClipboard({
+      clipboard: { readText: () => Clipboard.getStringAsync() },
+      terminal: { paste: (text) => emulatorRef.current?.paste(text) },
+    }).then(() => refreshClipboardAvailability());
+  }, [requestTerminalReflow, refreshClipboardAvailability]);
+
+  const handleTerminalCopy = useCallback(() => {
+    void emulatorRef.current
+      ?.copySelection({
+        writeText: async (text: string) => {
+          await Clipboard.setStringAsync(text);
+        },
+      })
+      .then(() => refreshClipboardAvailability());
+  }, [refreshClipboardAvailability]);
+
+  const handleKeyboardToggle = useCallback(() => {
+    if (isKeyboardToggleVisible) {
+      setIsKeyboardToggleVisible(false);
+      emulatorRef.current?.blur();
+      requestTerminalReflow();
+      return;
+    }
+
+    setIsKeyboardToggleVisible(true);
+    emulatorRef.current?.showKeyboard();
+    requestTerminalFocus();
+    requestTerminalReflow();
+  }, [isKeyboardToggleVisible, requestTerminalFocus, requestTerminalReflow]);
 
   const handleInputModeChange = useCallback((state: TerminalInputModeState) => {
     inputModeRef.current = state;
@@ -709,9 +810,9 @@ export function TerminalPane({
   const toggleModifier = useCallback(
     (modifier: keyof ModifierState) => {
       setModifiers((current) => ({ ...current, [modifier]: !current[modifier] }));
-      requestTerminalFocus();
+      requestTerminalReflow();
     },
-    [requestTerminalFocus],
+    [requestTerminalReflow],
   );
 
   const sendVirtualKey = useCallback(
@@ -724,14 +825,14 @@ export function TerminalPane({
         meta: false,
       });
       clearPendingModifiers();
-      requestTerminalFocus();
+      requestTerminalReflow();
     },
     [
       clearPendingModifiers,
       modifiers.alt,
       modifiers.ctrl,
       modifiers.shift,
-      requestTerminalFocus,
+      requestTerminalReflow,
       sendTerminalKey,
     ],
   );
@@ -752,6 +853,54 @@ export function TerminalPane({
     emulatorRef.current?.blur();
     onOpenFileExplorer();
   }, [swipeGesturesEnabled, onOpenFileExplorer]);
+  const showPasteAction = shouldShowTerminalPasteAction({ isNative });
+  const showFloatingCopyAction = shouldShowTerminalFloatingCopyAction({
+    hasSelection,
+    isNative,
+  });
+  const keyboardToggleIconColor = theme.colors.foregroundMuted;
+
+  const renderVirtualKeyboardControl = (control: TerminalVirtualKeyboardControl) => {
+    const controlId = getTerminalVirtualKeyboardControlId(control);
+    switch (control.type) {
+      case "key":
+        return (
+          <VirtualKeyButton
+            key={controlId}
+            id={control.button.id}
+            label={control.button.label}
+            keyValue={control.button.key}
+            onSend={sendVirtualKey}
+          />
+        );
+      case "modifier":
+        return (
+          <ModifierButton
+            key={controlId}
+            modifier={control.modifier}
+            active={modifiers[control.modifier]}
+            onToggle={toggleModifier}
+          />
+        );
+      case "paste":
+        return showPasteAction ? (
+          <TerminalPasteAction
+            key={controlId}
+            hasClipboardText={hasClipboardText}
+            onPaste={handleTerminalPaste}
+          />
+        ) : null;
+      case "keyboardToggle":
+        return (
+          <KeyboardToggleButton
+            key={controlId}
+            iconColor={keyboardToggleIconColor}
+            isKeyboardVisible={isKeyboardToggleVisible}
+            onToggle={handleKeyboardToggle}
+          />
+        );
+    }
+  };
   const showLoadingOverlay = shouldShowTerminalLoadingOverlay({
     isWorkspaceFocused,
     hasStreamError: Boolean(streamError),
@@ -782,6 +931,7 @@ export function TerminalPane({
               scrollbackLines={settings.terminalScrollbackLines}
               fontFamily={terminalFontFamily}
               fontSize={settings.codeFontSize}
+              keyboardInset={keyboardInset}
               swipeGesturesEnabled={swipeGesturesEnabled}
               initialSnapshot={initialSnapshot}
               onRendererReadyChange={handleRendererReadyChange}
@@ -792,6 +942,7 @@ export function TerminalPane({
               onResize={handleTerminalResize}
               onTerminalKey={handleTerminalKey}
               onInputModeChange={handleInputModeChange}
+              onSelectionChange={handleSelectionChange}
               onResolveLocalFileLink={handleResolveLocalFileLink}
               onOpenLocalFileLink={handleOpenLocalFileLink}
               onPendingModifiersConsumed={handlePendingModifiersConsumed}
@@ -809,6 +960,12 @@ export function TerminalPane({
             <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           </View>
         ) : null}
+
+        {showFloatingCopyAction ? (
+          <View pointerEvents="box-none" style={styles.floatingCopyContainer}>
+            <TerminalFloatingCopyAction hasSelection={hasSelection} onCopy={handleTerminalCopy} />
+          </View>
+        ) : null}
       </View>
 
       {streamError ? (
@@ -822,55 +979,14 @@ export function TerminalPane({
       {isMobile ? (
         <View style={styles.keyboardContainer} testID="terminal-virtual-keyboard">
           <View style={styles.keyboardRows}>
-            <View style={styles.keyboardRow}>
-              {[KEY_BUTTONS.esc, KEY_BUTTONS.tab].map((button) => (
-                <VirtualKeyButton
-                  key={button.id}
-                  id={button.id}
-                  label={button.label}
-                  keyValue={button.key}
-                  onSend={sendVirtualKey}
-                />
-              ))}
-
-              <ModifierButton modifier="ctrl" active={modifiers.ctrl} onToggle={toggleModifier} />
-
-              <VirtualKeyButton
-                id={KEY_BUTTONS.up.id}
-                label={KEY_BUTTONS.up.label}
-                keyValue={KEY_BUTTONS.up.key}
-                onSend={sendVirtualKey}
-              />
-
-              <ModifierButton modifier="shift" active={modifiers.shift} onToggle={toggleModifier} />
-
-              <VirtualKeyButton
-                id={KEY_BUTTONS.backspace.id}
-                label={KEY_BUTTONS.backspace.label}
-                keyValue={KEY_BUTTONS.backspace.key}
-                onSend={sendVirtualKey}
-              />
-            </View>
-
-            <View style={styles.keyboardRow}>
-              <ModifierButton modifier="alt" active={modifiers.alt} onToggle={toggleModifier} />
-
-              {[
-                KEY_BUTTONS.space,
-                KEY_BUTTONS.left,
-                KEY_BUTTONS.down,
-                KEY_BUTTONS.right,
-                KEY_BUTTONS.enter,
-              ].map((button) => (
-                <VirtualKeyButton
-                  key={button.id}
-                  id={button.id}
-                  label={button.label}
-                  keyValue={button.key}
-                  onSend={sendVirtualKey}
-                />
-              ))}
-            </View>
+            {TERMINAL_VIRTUAL_KEYBOARD_ROWS.map((row) => (
+              <View
+                key={row.map(getTerminalVirtualKeyboardControlId).join(":")}
+                style={styles.keyboardRow}
+              >
+                {row.map(renderVirtualKeyboardControl)}
+              </View>
+            ))}
           </View>
         </View>
       ) : null}
@@ -899,6 +1015,12 @@ const styles = StyleSheet.create((theme) => ({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0, 0, 0, 0.16)",
+  },
+  floatingCopyContainer: {
+    position: "absolute",
+    right: theme.spacing[3],
+    bottom: theme.spacing[12],
+    zIndex: 2,
   },
   errorRow: {
     paddingHorizontal: theme.spacing[3],
