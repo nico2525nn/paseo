@@ -947,7 +947,7 @@ test("captures Claude stderr in the turn failure diagnostic when stderr arrives 
   }
 });
 
-test("preserves bypass capability across query restarts triggered by thinking changes", async () => {
+test("omits dangerous permission-skip allowance from default-mode launches", async () => {
   const capturedOptions: Array<{
     permissionMode?: string;
     allowDangerouslySkipPermissions?: boolean;
@@ -964,11 +964,7 @@ test("preserves bypass capability across query restarts triggered by thinking ch
         effort?: string;
       };
     }) => {
-      capturedOptions.push({
-        permissionMode: options.permissionMode,
-        allowDangerouslySkipPermissions: options.allowDangerouslySkipPermissions,
-        effort: options.effort,
-      });
+      capturedOptions.push(options);
 
       return createBaseQueryMock(vi.fn(async () => ({ done: true, value: undefined })));
     },
@@ -977,21 +973,13 @@ test("preserves bypass capability across query restarts triggered by thinking ch
   const session = await createSession();
 
   try {
-    await session.setMode("bypassPermissions");
-    await session.setMode("acceptEdits");
-    await session.setThinkingOption("high");
-    await session.setMode("bypassPermissions");
+    await collectUntilTerminal(streamSession(session, "say exactly hello"));
 
-    expect(capturedOptions).toHaveLength(2);
+    expect(capturedOptions).toHaveLength(1);
     expect(capturedOptions[0]).toMatchObject({
       permissionMode: "default",
-      allowDangerouslySkipPermissions: true,
     });
-    expect(capturedOptions[1]).toMatchObject({
-      permissionMode: "acceptEdits",
-      allowDangerouslySkipPermissions: true,
-      effort: "high",
-    });
+    expect(capturedOptions[0]).not.toHaveProperty("allowDangerouslySkipPermissions");
   } finally {
     await session.close();
   }
