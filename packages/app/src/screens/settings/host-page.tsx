@@ -54,7 +54,6 @@ import { useSessionStore } from "@/stores/session-store";
 import { settingsStyles } from "@/styles/settings";
 import type { HostConnection, HostProfile } from "@/types/host-connection";
 import { confirmDialog } from "@/utils/confirm-dialog";
-import type { DaemonUpdateProgressStatusPayload } from "@getpaseo/protocol/messages";
 import { isVersionMismatch } from "@/desktop/updates/desktop-updates";
 import { resolveAppVersion } from "@/utils/app-version";
 import { formatConnectionStatus, getConnectionStatusTone } from "@/utils/daemons";
@@ -747,6 +746,14 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     () => isHostRuntimeConnected(runtime.getSnapshot(host.serverId)),
     [host.serverId, runtime],
   );
+  const hasReconnectedAfter = useCallback(
+    (startGeneration: number | null) => {
+      const snapshot = runtime.getSnapshot(host.serverId);
+      if (!snapshot || !isHostRuntimeConnected(snapshot)) return false;
+      return startGeneration === null || snapshot.clientGeneration !== startGeneration;
+    },
+    [host.serverId, runtime],
+  );
 
   const waitForCondition = useCallback(
     async (predicate: () => boolean, timeoutMs: number, intervalMs = 250) => {
@@ -761,24 +768,32 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     [],
   );
 
-  const waitForDaemonRestart = useCallback(async () => {
-    const disconnectTimeoutMs = 15000;
-    const reconnectTimeoutMs = 120000; // 2 minutes — npm update + restart can take a while
-    if (isHostConnected()) {
-      await waitForCondition(() => !isHostConnected(), disconnectTimeoutMs);
-    }
-    const reconnected = await waitForCondition(() => isHostConnected(), reconnectTimeoutMs);
-    if (isMountedRef.current) {
-      setIsUpdating(false);
-      setProgressPhase(null);
-      if (!reconnected) {
-        Alert.alert(
-          t("settings.host.daemon.update.unableToReconnectTitle"),
-          t("settings.host.daemon.update.unableToReconnectMessage", { name: host.label }),
+  const waitForDaemonRestart = useCallback(
+    async (startGeneration: number | null) => {
+      const disconnectTimeoutMs = 15000;
+      const reconnectTimeoutMs = 120000; // 2 minutes — npm update + restart can take a while
+      if (!hasReconnectedAfter(startGeneration) && isHostConnected()) {
+        await waitForCondition(
+          () => !isHostConnected() || hasReconnectedAfter(startGeneration),
+          disconnectTimeoutMs,
         );
       }
-    }
-  }, [host.label, isHostConnected, t, waitForCondition]);
+      const reconnected =
+        hasReconnectedAfter(startGeneration) ||
+        (await waitForCondition(() => hasReconnectedAfter(startGeneration), reconnectTimeoutMs));
+      if (isMountedRef.current) {
+        setIsUpdating(false);
+        setProgressPhase(null);
+        if (!reconnected) {
+          Alert.alert(
+            t("settings.host.daemon.update.unableToReconnectTitle"),
+            t("settings.host.daemon.update.unableToReconnectMessage", { name: host.label }),
+          );
+        }
+      }
+    },
+    [hasReconnectedAfter, host.label, isHostConnected, t, waitForCondition],
+  );
 
   const handleUpdate = useCallback(() => {
     if (!daemonClient) {
@@ -805,15 +820,15 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
     })
       .then((confirmed) => {
         if (!confirmed) return;
+        const startGeneration = runtime.getSnapshot(host.serverId)?.clientGeneration ?? null;
         setIsUpdating(true);
         setProgressPhase(t("settings.host.daemon.update.phaseStarting"));
+        const requestId = `settings_daemon_update_${host.serverId}`;
 
-        // Subscribe to progress events
-        const unsubscribe = daemonClient.subscribe((event) => {
-          if (event.type !== "status") return;
-          if (event.payload.status !== "daemon_update_progress") return;
+        const unsubscribe = daemonClient.on("daemon.update.progress", (message) => {
+          if (message.payload.requestId !== requestId) return;
           if (!isMountedRef.current) return;
-          const phase = (event.payload as DaemonUpdateProgressStatusPayload).phase;
+          const { phase } = message.payload;
           if (phase === "starting")
             setProgressPhase(t("settings.host.daemon.update.phaseStarting"));
           else if (phase === "downloading")
@@ -826,7 +841,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
         unsubscribeRef.current = unsubscribe;
 
         void daemonClient
-          .updateDaemon(`settings_daemon_update_${host.serverId}`)
+          .updateDaemon(requestId)
           .then((response) => {
             unsubscribeRef.current = null;
             unsubscribe();
@@ -843,7 +858,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
               return undefined;
             }
             // Update succeeded — wait for daemon to restart and reconnect
-            void waitForDaemonRestart();
+            void waitForDaemonRestart(startGeneration);
             return undefined;
           })
           .catch((error) => {
@@ -869,7 +884,7 @@ function UpdateDaemonCard({ host }: { host: HostProfile }) {
           t("settings.host.daemon.update.dialogFailedMessage"),
         );
       });
-  }, [daemonClient, host.label, host.serverId, isHostConnected, t, waitForDaemonRestart]);
+  }, [daemonClient, host.label, host.serverId, isHostConnected, runtime, t, waitForDaemonRestart]);
 
   const updateIcon = useMemo(
     () => <ArrowUpToLine size={theme.iconSize.sm} color={theme.colors.foreground} />,

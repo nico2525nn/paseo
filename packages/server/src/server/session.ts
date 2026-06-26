@@ -1,7 +1,6 @@
 import equal from "fast-deep-equal";
 import { v4 as uuidv4 } from "uuid";
 import { stat } from "node:fs/promises";
-import { spawn } from "node:child_process";
 import { basename, normalize, resolve, sep } from "path";
 import { homedir } from "node:os";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
@@ -381,9 +380,6 @@ class SessionRequestError extends Error {
     this.name = "SessionRequestError";
   }
 }
-
-// Global guard — only one daemon update can run at a time across all sessions.
-let daemonUpdateInProgress = false;
 
 export interface SessionFileSystem {
   isDirectory(path: string): Promise<boolean>;
@@ -781,7 +777,9 @@ export class Session {
     this.daemonSession = new DaemonSession({
       host: {
         emit: (msg) => this.emit(msg),
+        emitLifecycleIntent: (intent) => this.emitLifecycleIntent(intent),
       },
+      clientId: this.clientId,
       paseoHome: this.paseoHome,
       serverId,
       daemonVersion,
@@ -1515,7 +1513,7 @@ export class Session {
       case "diagnostics.request":
         return this.daemonSession.handleDiagnosticsRequest(msg);
       case "daemon.update.request":
-        return this.handleDaemonUpdateRequest(msg);
+        return this.daemonSession.handleUpdateRequest(msg);
       case "set_daemon_config_request":
         this.emit({
           type: "set_daemon_config_response",
@@ -1781,134 +1779,6 @@ export class Session {
       clientId: this.clientId,
       requestId,
     });
-  }
-
-  private async handleDaemonUpdateRequest(
-    msg: Extract<SessionInboundMessage, { type: "daemon.update.request" }>,
-  ): Promise<void> {
-    if (daemonUpdateInProgress) {
-      this.emit({
-        type: "rpc_error",
-        payload: {
-          requestId: msg.requestId,
-          requestType: "daemon.update.request",
-          error: "An update is already in progress",
-          code: "already_updating",
-        },
-      });
-      return;
-    }
-
-    daemonUpdateInProgress = true;
-    const previousVersion = this.daemonVersion ?? null;
-
-    const emitProgress = (phase: "starting" | "downloading" | "installing" | "complete") => {
-      this.emit({
-        type: "status",
-        payload: {
-          status: "daemon_update_progress",
-          requestId: msg.requestId,
-          phase,
-        },
-      });
-    };
-
-    const emitResponse = (success: boolean, error: string | null, newVersion: string | null) => {
-      this.emit({
-        type: "daemon.update.response",
-        payload: {
-          requestId: msg.requestId,
-          success,
-          error,
-          previousVersion,
-          newVersion,
-        },
-      });
-    };
-
-    try {
-      emitProgress("starting");
-
-      // Check if npm is available
-      const npmVersionOk = await new Promise<boolean>((fulfill) => {
-        const proc = spawn("npm", ["--version"], {
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout: 10000,
-        });
-        proc.on("close", (code: number | null) => fulfill(code === 0));
-        proc.on("error", () => fulfill(false));
-      });
-
-      if (!npmVersionOk) {
-        emitResponse(false, "npm is not available on this system", null);
-        daemonUpdateInProgress = false;
-        return;
-      }
-
-      emitProgress("downloading");
-
-      // Install latest version globally — npm install -g @getpaseo/cli@latest
-      // is more reliable than npm update -g, especially across major versions.
-      const result = await new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-        (fulfill) => {
-          const proc = spawn("npm", ["install", "-g", "@getpaseo/cli@latest"], {
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 300_000, // 5 minutes
-          });
-          let stdout = "";
-          let stderr = "";
-          proc.stdout.on("data", (data: Buffer) => {
-            stdout += data.toString();
-          });
-          proc.stderr.on("data", (data: Buffer) => {
-            stderr += data.toString();
-          });
-          proc.on("close", (code: number | null) => {
-            fulfill({ exitCode: code ?? 1, stdout, stderr });
-          });
-          proc.on("error", (err: Error) => {
-            fulfill({ exitCode: 1, stdout, stderr: err.message });
-          });
-        },
-      );
-
-      if (result.exitCode !== 0) {
-        const errorMsg =
-          result.stderr.trim() || result.stdout.trim() || `npm exited with code ${result.exitCode}`;
-        this.sessionLogger.error(
-          { exitCode: result.exitCode, stderr: result.stderr },
-          "Daemon update failed",
-        );
-        emitResponse(false, errorMsg, null);
-        daemonUpdateInProgress = false;
-        return;
-      }
-
-      emitProgress("installing");
-
-      // Try to parse the new version from npm output
-      let newVersion: string | null = null;
-      const versionMatch = result.stdout.match(/@getpaseo\/cli@(\S+)/);
-      if (versionMatch) {
-        newVersion = versionMatch[1];
-      }
-
-      emitProgress("complete");
-      emitResponse(true, null, newVersion);
-
-      // Trigger restart to load the new code
-      this.emitLifecycleIntent({
-        type: "restart",
-        clientId: this.clientId,
-        requestId: msg.requestId,
-        reason: "daemon_update",
-      });
-    } catch (error) {
-      this.sessionLogger.error({ err: error }, "Daemon update failed with exception");
-      emitResponse(false, error instanceof Error ? error.message : "Unknown error", null);
-    } finally {
-      daemonUpdateInProgress = false;
-    }
   }
 
   private emitLifecycleIntent(intent: SessionLifecycleIntent): void {

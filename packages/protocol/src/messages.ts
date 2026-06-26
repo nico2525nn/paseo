@@ -2423,16 +2423,6 @@ export const ShutdownRequestedStatusPayloadSchema = z.object({
   requestId: z.string(),
 });
 
-export const DaemonUpdateProgressStatusPayloadSchema = z.object({
-  status: z.literal("daemon_update_progress"),
-  requestId: z.string(),
-  phase: z.enum(["starting", "downloading", "installing", "complete"]),
-});
-
-export type DaemonUpdateProgressStatusPayload = z.infer<
-  typeof DaemonUpdateProgressStatusPayloadSchema
->;
-
 export const DaemonConfigChangedStatusPayloadSchema = z
   .object({
     status: z.literal("daemon_config_changed"),
@@ -2447,7 +2437,6 @@ export const KnownStatusPayloadSchema = z.discriminatedUnion("status", [
   AgentRefreshedStatusPayloadSchema,
   ShutdownRequestedStatusPayloadSchema,
   RestartRequestedStatusPayloadSchema,
-  DaemonUpdateProgressStatusPayloadSchema,
   DaemonConfigChangedStatusPayloadSchema,
 ]);
 
@@ -4125,6 +4114,16 @@ export const DaemonUpdateResponseSchema = z.object({
 
 export type DaemonUpdateResponse = z.infer<typeof DaemonUpdateResponseSchema>;
 
+export const DaemonUpdateProgressMessageSchema = z.object({
+  type: z.literal("daemon.update.progress"),
+  payload: z.object({
+    requestId: z.string(),
+    phase: z.enum(["starting", "downloading", "installing", "complete"]),
+  }),
+});
+
+export type DaemonUpdateProgressMessage = z.infer<typeof DaemonUpdateProgressMessageSchema>;
+
 export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ActivityLogMessageSchema,
   AssistantChunkMessageSchema,
@@ -4260,6 +4259,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   LoopInspectResponseSchema,
   LoopLogsResponseSchema,
   LoopStopResponseSchema,
+  DaemonUpdateProgressMessageSchema,
   DaemonUpdateResponseSchema,
 ]);
 
