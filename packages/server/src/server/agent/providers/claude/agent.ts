@@ -1634,7 +1634,8 @@ function resolveInitialContextWindowSize(modelId: string | null | undefined): nu
   if (normalized.includes("[1m]") || normalized.includes("context-1m")) {
     return 1_000_000;
   }
-  if (normalized.includes("claude-fable-5")) {
+  const catalogModelId = normalizeClaudeRuntimeModelId(normalized);
+  if (catalogModelId === "claude-fable-5" || catalogModelId === "claude-sonnet-5") {
     return 1_000_000;
   }
   if (/(?:^|[~/_-])(?:claude[-_ ]*)?(opus|sonnet|haiku)(?:$|[-_ ./])/.test(normalized)) {

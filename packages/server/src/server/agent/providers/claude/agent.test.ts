@@ -1892,6 +1892,45 @@ describe("ClaudeAgentSession context window usage", () => {
     }
   });
 
+  test("selected native-1M Claude models seed active context window usage with 1M max tokens", async () => {
+    const session = await createSessionForTurns(
+      [
+        [
+          createInitMessage(),
+          createMessageStartEvent(),
+          createSuccessResult({ modelUsage: undefined }),
+        ],
+      ],
+      { model: "claude-sonnet-5" },
+    );
+
+    try {
+      const events = await collectStreamEvents(session);
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "usage_updated",
+          provider: "claude",
+          usage: {
+            contextWindowMaxTokens: 1_000_000,
+            contextWindowUsedTokens: 150,
+          },
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn_completed",
+          provider: "claude",
+          usage: expect.objectContaining({
+            contextWindowMaxTokens: 1_000_000,
+          }),
+        }),
+      );
+    } finally {
+      await session.close();
+    }
+  });
+
   test("message_delta stream events update per-request usage", async () => {
     const session = await createSessionForTurns([
       [

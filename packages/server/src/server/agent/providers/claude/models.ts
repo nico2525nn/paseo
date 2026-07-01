@@ -225,15 +225,16 @@ export function normalizeClaudeRuntimeModelId(value: string | null | undefined):
     return trimmed;
   }
 
-  // Fable and Sonnet 5 use single-segment versions, not the {major}-{minor}
-  // scheme of older opus/sonnet/haiku models. They are natively 1M, so map
-  // dated or suffixed runtime strings back to the one catalog ID.
+  // Some new Claude model families use single-segment versions, not the
+  // {major}-{minor} scheme of older opus/sonnet/haiku models. Map dated or
+  // suffixed runtime strings back to the matching catalog ID.
   const singleSegmentMatch = trimmed.match(/(?:claude-)?(fable|sonnet)[-_ ]+(\d+)/i);
   if (singleSegmentMatch) {
     const family = singleSegmentMatch[1].toLowerCase();
     const major = singleSegmentMatch[2];
-    if (family === "fable" || (family === "sonnet" && major === "5")) {
-      return `claude-${family}-${major}`;
+    const modelId = `claude-${family}-${major}`;
+    if (CLAUDE_MODELS.some((model) => model.id === modelId)) {
+      return modelId;
     }
   }
 

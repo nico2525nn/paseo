@@ -219,6 +219,9 @@ describe("normalizeClaudeRuntimeModelId", () => {
 
   it("preserves [1m] suffix from runtime model strings", () => {
     expect(normalizeClaudeRuntimeModelId("claude-opus-4-6[1m]")).toBe("claude-opus-4-6[1m]");
+  });
+
+  it("strips [1m] suffix for natively-1M models", () => {
     expect(normalizeClaudeRuntimeModelId("claude-sonnet-5[1m]")).toBe("claude-sonnet-5");
   });
 
