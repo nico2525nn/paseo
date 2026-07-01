@@ -211,6 +211,25 @@ async function openReadyMockAgent(
   }
 }
 
+async function seedDotPrefixedWorkspaceFiles(cwd: string): Promise<void> {
+  await writeFile(path.join(cwd, ".env.local"), "PASEO_E2E=1\n");
+  await mkdir(path.join(cwd, ".opencode"), { recursive: true });
+  await writeFile(path.join(cwd, ".opencode", "settings.json"), "{}\n");
+}
+
+async function expectFileMentionSuggestion(
+  page: Page,
+  query: string,
+  suggestion: string,
+): Promise<void> {
+  const input = composerLocator(page);
+  await input.fill(query);
+  const popover = page.getByTestId("composer-autocomplete-popover");
+  await expect(popover.getByText(suggestion, { exact: true }).first()).toBeVisible({
+    timeout: 30_000,
+  });
+}
+
 async function visiblePopoverBox(
   page: Page,
 ): Promise<{ top: number; bottom: number; height: number }> {
@@ -528,10 +547,7 @@ test.describe("Composer autocomplete", () => {
     });
 
     try {
-      await writeFile(path.join(session.cwd, ".env.local"), "PASEO_E2E=1\n");
-      await mkdir(path.join(session.cwd, ".opencode"), { recursive: true });
-      await writeFile(path.join(session.cwd, ".opencode", "settings.json"), "{}\n");
-
+      await seedDotPrefixedWorkspaceFiles(session.cwd);
       await openAgentRoute(page, session);
       await expectWorkspaceTabVisible(page, session.agentId);
       await expectComposerVisible(page);
@@ -539,18 +555,8 @@ test.describe("Composer autocomplete", () => {
       const input = composerLocator(page);
       await expect(input).toBeEditable({ timeout: 30_000 });
 
-      await input.fill("@.env");
-      const popover = page.getByTestId("composer-autocomplete-popover");
-      await expect(popover.getByText(".env.local", { exact: true }).first()).toBeVisible({
-        timeout: 30_000,
-      });
-
-      await input.fill("@.opencode");
-      await expect(
-        popover.getByText(".opencode/settings.json", { exact: true }).first(),
-      ).toBeVisible({
-        timeout: 30_000,
-      });
+      await expectFileMentionSuggestion(page, "@.env", ".env.local");
+      await expectFileMentionSuggestion(page, "@.opencode", ".opencode/settings.json");
     } finally {
       await session.cleanup();
     }

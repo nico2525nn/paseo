@@ -495,10 +495,31 @@ describe("searchWorkspaceEntries", () => {
     });
 
     expect(results).toContainEqual({ path: ".claude", kind: "directory" });
-    expect(results).toContainEqual({
+    expect(results).not.toContainEqual({
       path: ".claude/settings.local.json",
       kind: "file",
     });
+  });
+
+  it("constrains fuzzy path-style queries to the typed parent directory", async () => {
+    mkdirSync(path.join(workspaceDir, "src", "nested"), { recursive: true });
+    writeFileSync(path.join(workspaceDir, "src", "config.ts"), "");
+    writeFileSync(path.join(workspaceDir, "src", "nested", "config.ts"), "");
+    writeFileSync(path.join(workspaceDir, "docs", "config.ts"), "");
+
+    const results = await searchWorkspaceEntries({
+      cwd: workspaceDir,
+      query: "src/co",
+      limit: 20,
+      includeFiles: true,
+      includeDirectories: true,
+      matchMode: "fuzzy",
+    });
+
+    expect(results).toContainEqual({ path: "src/components", kind: "directory" });
+    expect(results).toContainEqual({ path: "src/config.ts", kind: "file" });
+    expect(results).not.toContainEqual({ path: "src/nested/config.ts", kind: "file" });
+    expect(results).not.toContainEqual({ path: "docs/config.ts", kind: "file" });
   });
 
   it("does not traverse .git while searching workspace files", async () => {

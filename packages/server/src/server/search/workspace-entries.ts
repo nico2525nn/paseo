@@ -1,8 +1,16 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { DirItem, FileFinder, FileItem, MixedItem, Result } from "@ff-labs/fff-node";
+import type {
+  DirItem,
+  FileFinder,
+  FileItem,
+  InitOptions,
+  MixedItem,
+  Result,
+} from "@ff-labs/fff-node";
 import { isPathInsideRoot } from "../../utils/path.js";
 
 export type WorkspaceSuggestionKind = "file" | "directory";
@@ -28,6 +36,18 @@ type FffModule = typeof import("@ff-labs/fff-node");
 interface WorkspaceFinderCacheEntry {
   finder: FileFinder;
   expiresAt: number;
+}
+
+interface WorkspaceQueryParts {
+  isPathQuery: boolean;
+  normalizedQuery: string;
+  parentPart: string;
+  searchTerm: string;
+}
+
+interface PackagedFffPackageJson {
+  main?: unknown;
+  exports?: unknown;
 }
 
 const DEFAULT_LIMIT = 30;
@@ -75,13 +95,18 @@ export async function searchWorkspaceEntries(
   }
 
   const searchQuery =
-    matchMode === "suffix"
-      ? [queryParts.parentPart, queryParts.searchTerm].filter(Boolean).join("/")
+    matchMode === "suffix" || queryParts.isPathQuery
+      ? queryParts.normalizedQuery
       : queryParts.searchTerm;
+  const parentConstraint =
+    matchMode === "fuzzy" && queryParts.isPathQuery ? queryParts.parentPart : null;
   const finder = await getWorkspaceFinder(workspaceRoot);
   const scan = await finder.waitForScan(FFF_SCAN_WAIT_TIMEOUT_MS);
   if (!scan.ok) {
     throw new Error(`Workspace search scan failed: ${scan.error}`);
+  }
+  if (!scan.value) {
+    throw new Error(`Workspace search scan timed out after ${FFF_SCAN_WAIT_TIMEOUT_MS}ms`);
   }
 
   const candidates = await searchFffEntries({
@@ -96,6 +121,7 @@ export async function searchWorkspaceEntries(
     includeDirectories,
     includeFiles,
     matchMode,
+    parentConstraint,
     suffixQuery: searchQuery,
   });
   const deduped = dedupeWorkspaceEntries(entries);
@@ -113,6 +139,8 @@ export function clearWorkspaceSearchCacheForTests(): void {
 }
 
 async function getWorkspaceFinder(workspaceRoot: string): Promise<FileFinder> {
+  pruneWorkspaceFinderCache();
+
   const now = Date.now();
   const cached = workspaceFinderCache.get(workspaceRoot);
   if (cached && cached.expiresAt > now && !cached.finder.isDestroyed) {
@@ -125,6 +153,8 @@ async function getWorkspaceFinder(workspaceRoot: string): Promise<FileFinder> {
   }
 
   const { FileFinder } = await loadFffModule();
+  pruneWorkspaceFinderCache();
+
   const afterImportCached = workspaceFinderCache.get(workspaceRoot);
   if (
     afterImportCached &&
@@ -140,6 +170,7 @@ async function getWorkspaceFinder(workspaceRoot: string): Promise<FileFinder> {
     aiMode: true,
     disableMmapCache: true,
     disableContentIndexing: true,
+    ...(await getRootScanningOptions(workspaceRoot)),
   });
   if (!created.ok) {
     throw new Error(`Workspace search initialization failed: ${created.error}`);
@@ -169,17 +200,16 @@ function resolvePackagedFffEntrypoint(): string | null {
     return null;
   }
 
-  const candidate = path.join(
+  const packageRoot = path.join(
     resourcesPath,
     "app.asar.unpacked",
     "node_modules",
     "@ff-labs",
     "fff-node",
-    "dist",
-    "src",
-    "index.js",
   );
-  return existsSync(candidate) ? candidate : null;
+  // Load the unpacked package entry declared by FFF instead of duplicating its dist layout here.
+  const candidate = resolvePackagedFffEntrypointFromPackage(packageRoot);
+  return candidate && existsSync(candidate) ? candidate : null;
 }
 
 async function searchFffEntries(input: {
@@ -208,6 +238,8 @@ async function searchFffEntries(input: {
     input.finder.directorySearch(input.query, { pageSize: FFF_SEARCH_PAGE_SIZE }),
     "Workspace directory search failed",
   );
+  // FFF directory search only returns directories whose own names match. File search lets us
+  // derive matching ancestor directories from files nested below them.
   const fileResult = unwrapFffResult(
     input.finder.fileSearch(input.query, { pageSize: FFF_SEARCH_PAGE_SIZE }),
     "Workspace file search failed",
@@ -249,6 +281,7 @@ async function normalizeFffEntries(input: {
   includeDirectories: boolean;
   includeFiles: boolean;
   matchMode: WorkspaceMatchMode;
+  parentConstraint: string | null;
   suffixQuery: string;
 }): Promise<WorkspaceSuggestionEntry[]> {
   const entries: WorkspaceSuggestionEntry[] = [];
@@ -263,6 +296,15 @@ async function normalizeFffEntries(input: {
         continue;
       }
       if (entry.kind === "file" && !input.includeFiles) {
+        continue;
+      }
+      if (
+        input.parentConstraint !== null &&
+        !workspaceEntryIsDirectChildOfParent({
+          relativePath: entry.path,
+          parentPart: input.parentConstraint,
+        })
+      ) {
         continue;
       }
       if (
@@ -485,8 +527,9 @@ function workspaceEntryMatchesSuffixQuery(input: { relativePath: string; query: 
 function normalizeWorkspaceQueryParts(
   query: string,
   workspaceRoot: string,
-): { parentPart: string; searchTerm: string } | null {
+): WorkspaceQueryParts | null {
   let normalized = normalizeFffRelativePath(query.trim());
+  let isPathQuery = normalized.startsWith("./") || normalized.startsWith("../");
 
   if (path.isAbsolute(normalized)) {
     const absolute = path.resolve(normalized);
@@ -494,11 +537,15 @@ function normalizeWorkspaceQueryParts(
       return null;
     }
     normalized = normalizeRelativePath(workspaceRoot, absolute);
+    isPathQuery = true;
   }
 
   normalized = normalized.replace(/^\.\/+/, "").replace(/\/{2,}/g, "/");
+  isPathQuery = isPathQuery || normalized.includes("/");
   if (!normalized) {
     return {
+      isPathQuery,
+      normalizedQuery: "",
       parentPart: "",
       searchTerm: "",
     };
@@ -506,9 +553,89 @@ function normalizeWorkspaceQueryParts(
 
   const slashIndex = normalized.lastIndexOf("/");
   return {
+    isPathQuery,
+    normalizedQuery: normalized,
     parentPart: slashIndex >= 0 ? normalized.slice(0, slashIndex) : "",
     searchTerm: slashIndex >= 0 ? normalized.slice(slashIndex + 1) : normalized,
   };
+}
+
+async function getRootScanningOptions(
+  workspaceRoot: string,
+): Promise<Pick<InitOptions, "enableFsRootScanning" | "enableHomeDirScanning">> {
+  const homeRoot = await resolveDirectory(homedir());
+  return {
+    enableFsRootScanning: workspaceRoot === path.parse(workspaceRoot).root,
+    enableHomeDirScanning: homeRoot === workspaceRoot,
+  };
+}
+
+function resolvePackagedFffEntrypointFromPackage(packageRoot: string): string | null {
+  const packageJsonPath = path.join(packageRoot, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return null;
+  }
+
+  let packageJson: PackagedFffPackageJson;
+  try {
+    packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as PackagedFffPackageJson;
+  } catch {
+    return null;
+  }
+
+  const entrypoint = getPackageEntrypoint(packageJson) ?? null;
+  return entrypoint ? path.resolve(packageRoot, entrypoint) : null;
+}
+
+function getPackageEntrypoint(packageJson: PackagedFffPackageJson): string | null {
+  const exportedEntrypoint = getRootExportEntrypoint(packageJson.exports);
+  if (exportedEntrypoint) {
+    return exportedEntrypoint;
+  }
+  return typeof packageJson.main === "string" ? packageJson.main : null;
+}
+
+function getRootExportEntrypoint(exportsField: unknown): string | null {
+  if (typeof exportsField === "string") {
+    return exportsField;
+  }
+  if (!exportsField || typeof exportsField !== "object") {
+    return null;
+  }
+
+  const rootExport = (exportsField as Record<string, unknown>)["."];
+  if (typeof rootExport === "string") {
+    return rootExport;
+  }
+  if (!rootExport || typeof rootExport !== "object") {
+    return null;
+  }
+
+  const conditions = rootExport as Record<string, unknown>;
+  if (typeof conditions.import === "string") {
+    return conditions.import;
+  }
+  return typeof conditions.default === "string" ? conditions.default : null;
+}
+
+function workspaceEntryIsDirectChildOfParent(input: {
+  relativePath: string;
+  parentPart: string;
+}): boolean {
+  const relativePath = normalizeFffRelativePath(input.relativePath).replace(/^\.\/+/, "");
+  const parentPart = normalizeFffRelativePath(input.parentPart)
+    .replace(/^\.\/+/, "")
+    .replace(/\/+$/, "");
+
+  if (!parentPart) {
+    return relativePath.length > 0 && !relativePath.includes("/");
+  }
+  if (!relativePath.startsWith(`${parentPart}/`)) {
+    return false;
+  }
+
+  const childPart = relativePath.slice(parentPart.length + 1);
+  return childPart.length > 0 && !childPart.includes("/");
 }
 
 function normalizeLimit(limit: number | undefined): number {
@@ -546,10 +673,6 @@ function normalizeFffRelativePath(value: string): string {
 }
 
 function pruneWorkspaceFinderCache(): void {
-  if (workspaceFinderCache.size <= FFF_FINDER_CACHE_MAX_ENTRIES) {
-    return;
-  }
-
   const now = Date.now();
   for (const [cacheKey, entry] of workspaceFinderCache) {
     if (entry.expiresAt <= now || entry.finder.isDestroyed) {
