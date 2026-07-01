@@ -31,6 +31,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-fable-5",
     label: "Fable 5",
     description: "Fable 5 · Most powerful model",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_ULTRACODE_THINKING_OPTIONS],
   },
   {
@@ -38,6 +39,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-8[1m]",
     label: "Opus 4.8 1M",
     description: "Opus 4.8 with 1M context window",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_ULTRACODE_THINKING_OPTIONS],
   },
   {
@@ -46,6 +48,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     label: "Opus 4.8",
     description: "Opus 4.8 · Latest release",
     isDefault: true,
+    contextWindowMaxTokens: 200_000,
     thinkingOptions: [...CLAUDE_ULTRACODE_THINKING_OPTIONS],
   },
   {
@@ -53,6 +56,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-sonnet-5",
     label: "Sonnet 5",
     description: "Sonnet 5 · Efficient for routine tasks",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_EXTENDED_THINKING_OPTIONS],
   },
   {
@@ -60,6 +64,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-7[1m]",
     label: "Opus 4.7 1M",
     description: "Opus 4.7 with 1M context window",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_EXTENDED_THINKING_OPTIONS],
   },
   {
@@ -67,6 +72,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-7",
     label: "Opus 4.7",
     description: "Opus 4.7 · Previous release",
+    contextWindowMaxTokens: 200_000,
     thinkingOptions: [...CLAUDE_EXTENDED_THINKING_OPTIONS],
   },
   {
@@ -74,6 +80,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-6[1m]",
     label: "Opus 4.6 1M",
     description: "Opus 4.6 with 1M context window",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
@@ -81,6 +88,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-opus-4-6",
     label: "Opus 4.6",
     description: "Opus 4.6 · Most capable for complex work",
+    contextWindowMaxTokens: 200_000,
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
@@ -88,6 +96,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-sonnet-4-6[1m]",
     label: "Sonnet 4.6 1M",
     description: "Sonnet 4.6 with 1M context window",
+    contextWindowMaxTokens: 1_000_000,
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
@@ -95,6 +104,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-sonnet-4-6",
     label: "Sonnet 4.6",
     description: "Sonnet 4.6 · Best for everyday tasks",
+    contextWindowMaxTokens: 200_000,
     thinkingOptions: [...CLAUDE_THINKING_OPTIONS],
   },
   {
@@ -102,6 +112,7 @@ const CLAUDE_MODELS: AgentModelDefinition[] = [
     id: "claude-haiku-4-5",
     label: "Haiku 4.5",
     description: "Haiku 4.5 · Fastest for quick answers",
+    contextWindowMaxTokens: 200_000,
   },
 ];
 
@@ -115,6 +126,14 @@ const CLAUDE_SETTINGS_MODEL_ENV_KEYS = [
 
 export function getClaudeModels(): AgentModelDefinition[] {
   return CLAUDE_MODELS.map((model) => ({ ...model }));
+}
+
+export function findClaudeModel(modelId: string | null | undefined): AgentModelDefinition | null {
+  const normalizedModelId = normalizeClaudeRuntimeModelId(modelId);
+  if (!normalizedModelId) {
+    return null;
+  }
+  return CLAUDE_MODELS.find((model) => model.id === normalizedModelId) ?? null;
 }
 
 export async function getClaudeModelsWithSettings(
