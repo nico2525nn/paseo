@@ -1946,7 +1946,7 @@ const PaseoAgentSetProviderOptionsSchema = z
     api: z.string().min(1).optional(),
     headers: z.record(z.string(), z.string()).optional(),
     authHeader: z.boolean().optional(),
-    models: z.array(PaseoAgentProviderModelConfigSchema).min(1),
+    models: z.array(PaseoAgentProviderModelConfigSchema).min(1).optional(),
   })
   .strict();
 

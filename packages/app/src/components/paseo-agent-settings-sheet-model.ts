@@ -102,7 +102,7 @@ export function createPaseoAgentProviderInput(input: {
     name: input.name.trim(),
     providerType: input.entry.id,
     options: {
-      models,
+      ...(models.length > 0 ? { models } : {}),
       ...(apiKey ? { apiKey } : {}),
     },
   };

@@ -13,6 +13,30 @@ function createServerInfo() {
 }
 
 describe("provider ls", () => {
+  it("renders an empty configured-provider table with headers", async () => {
+    const result = await runLsCommand({ host: "localhost:7777" }, {} as never, {
+      connectDaemon: async () => ({
+        getLastServerInfoMessage: createServerInfo,
+        getPaseoAgentCatalog: async () => ({
+          requestId: "catalog-1",
+          catalog: [],
+          error: null,
+        }),
+        getPaseoAgentProviders: async () => ({
+          requestId: "providers-1",
+          defaultModel: null,
+          providers: [],
+          error: null,
+        }),
+        close: async () => {},
+      }),
+    });
+
+    expect(result.data).toEqual([]);
+    expect(render(result, { format: "table", noColor: true })).toContain("NAME");
+    expect(render(result, { format: "json" })).toBe("[]");
+  });
+
   it("lists configured model providers with catalog labels and auth states", async () => {
     const result = await runLsCommand({ host: "localhost:7777" }, {} as never, {
       connectDaemon: async (options) => {

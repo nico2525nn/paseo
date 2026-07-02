@@ -13,6 +13,7 @@ import { loginOAuthBrowser } from "@getpaseo/server";
 import { connectToDaemon } from "../../utils/client.js";
 import { collectMultiple } from "../../utils/command-options.js";
 import { openBrowserUrl } from "../../utils/open-browser.js";
+import { requirePaseoAgentCatalogFeature } from "./feature.js";
 import type {
   CommandError,
   CommandOptions,
@@ -127,18 +128,6 @@ async function promptSecret(message: string): Promise<string> {
   }
 }
 
-function requirePaseoAgentCatalogFeature(
-  client: Pick<DaemonClient, "getLastServerInfoMessage">,
-): void {
-  if (client.getLastServerInfoMessage()?.features?.paseoAgentCatalog === true) {
-    return;
-  }
-  throw {
-    code: "HOST_UPDATE_REQUIRED",
-    message: "Update the Paseo daemon to use this command.",
-  } satisfies CommandError;
-}
-
 function authField(entry: PaseoAgentCatalogEntry, field: string): string | undefined {
   const auth = entry.auth;
   const value = auth[field];
@@ -185,10 +174,10 @@ function catalogModels(entry: PaseoAgentCatalogEntry): ProviderModelInput[] {
   }));
 }
 
-function requireModels(
+function resolveModels(
   entry: PaseoAgentCatalogEntry,
   options: ProviderAddOptions,
-): ProviderModelInput[] {
+): ProviderModelInput[] | undefined {
   const modelIds = normalizeModels(options.model);
   if (modelIds.length > 0) {
     return modelIds.map((id) => ({ id }));
@@ -198,12 +187,7 @@ function requireModels(
   if (models.length > 0) {
     return models;
   }
-  throw {
-    code: "MISSING_MODELS",
-    message: `At least one model is required for ${entry.label}.`,
-    details:
-      "Pass --model <model-id>. Repeat --model to configure more than one; comma-separated values are also accepted.",
-  } satisfies CommandError;
+  return undefined;
 }
 
 async function selectCatalogEntry(
@@ -249,9 +233,10 @@ async function resolveEntry(
     return entry;
   }
 
+  const knownIds = catalog.map((candidate) => candidate.id).join(", ");
   throw {
     code: "UNKNOWN_PROVIDER",
-    message: `Unknown model provider type "${id}".`,
+    message: `Unknown model provider type "${id}". Known provider ids: ${knownIds}.`,
   } satisfies CommandError;
 }
 
@@ -427,7 +412,7 @@ async function configureProvider(
   options: ProviderAddOptions,
   dependencies: ProviderAddDependencies,
 ): Promise<RedactedPaseoAgentProviderConfig> {
-  const models = requireModels(entry, options);
+  const models = resolveModels(entry, options);
   const apiKey =
     entry.auth.kind === "api_key" ? await resolveApiKey(entry, options, dependencies) : undefined;
   const result = await client.setPaseoAgentProvider({
@@ -435,7 +420,7 @@ async function configureProvider(
     providerType: entry.id,
     options: {
       ...(apiKey ? { apiKey } : {}),
-      models,
+      ...(models ? { models } : {}),
     },
   });
   if (!result.success || !result.provider) {

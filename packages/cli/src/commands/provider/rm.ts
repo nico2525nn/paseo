@@ -8,6 +8,7 @@ import type {
   OutputSchema,
   SingleResult,
 } from "../../output/index.js";
+import { requirePaseoAgentCatalogFeature } from "./feature.js";
 
 interface ProviderRmOptions extends CommandOptions {
   host?: string;
@@ -38,18 +39,6 @@ export const providerRemoveSchema: OutputSchema<ProviderRemoveItem> = {
     { header: "REMOVED", field: "removed", width: 10 },
   ],
 };
-
-function requirePaseoAgentCatalogFeature(
-  client: Pick<DaemonClient, "getLastServerInfoMessage">,
-): void {
-  if (client.getLastServerInfoMessage()?.features?.paseoAgentCatalog === true) {
-    return;
-  }
-  throw {
-    code: "HOST_UPDATE_REQUIRED",
-    message: "Update the Paseo daemon to use this command.",
-  } satisfies CommandError;
-}
 
 export async function runRmCommand(
   name: string,

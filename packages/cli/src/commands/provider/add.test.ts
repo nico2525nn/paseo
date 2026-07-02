@@ -18,7 +18,7 @@ interface RecordingClientInput {
   setProvider?: (input: {
     name: string;
     providerType: string;
-    options: { apiKey?: string; models: Array<{ id: string }> };
+    options: { apiKey?: string; models?: Array<{ id: string }> };
   }) => Promise<unknown>;
   startOAuth?: (name: string) => Promise<unknown>;
   completeOAuth?: (name: string) => Promise<unknown>;
@@ -40,7 +40,7 @@ function createClient(input: RecordingClientInput) {
     setPaseoAgentProvider: async (providerInput: {
       name: string;
       providerType: string;
-      options: { apiKey?: string; models: Array<{ id: string }> };
+      options: { apiKey?: string; models?: Array<{ id: string }> };
     }) => {
       if (input.setProvider) {
         return input.setProvider(providerInput);
@@ -51,7 +51,7 @@ function createClient(input: RecordingClientInput) {
         provider: {
           name: providerInput.name,
           providerType: providerInput.providerType,
-          models: providerInput.options.models,
+          models: providerInput.options.models ?? [],
           auth: { kind: "api_key", configured: true, source: "literal" },
           available: true,
           error: null,
@@ -159,7 +159,7 @@ describe("provider add", () => {
                 provider: {
                   name: input.name,
                   providerType: input.providerType,
-                  models: input.options.models,
+                  models: input.options.models ?? [],
                   auth: { kind: "api_key", configured: true, source: "literal" },
                   available: true,
                   error: null,
@@ -211,7 +211,7 @@ describe("provider add", () => {
               provider: {
                 name: input.name,
                 providerType: input.providerType,
-                models: input.options.models,
+                models: input.options.models ?? [],
                 auth: { kind: "api_key", configured: false, source: "env" },
                 available: false,
                 error: null,
@@ -258,7 +258,7 @@ describe("provider add", () => {
               provider: {
                 name: input.name,
                 providerType: input.providerType,
-                models: input.options.models,
+                models: input.options.models ?? [],
                 auth: { kind: "api_key", configured: true, source: "literal" },
                 available: true,
                 error: null,
@@ -279,6 +279,57 @@ describe("provider add", () => {
         },
       },
     ]);
+  });
+
+  it("configures an API-key provider without model defaults", async () => {
+    const setCalls: unknown[] = [];
+
+    const result = await runAddCommand("alpha-key", { apiKeyStdin: true }, {} as never, {
+      readStdin: async () => "stdin-secret\n",
+      promptSecret: async () => {
+        throw new Error("prompt should not be used with --api-key-stdin");
+      },
+      promptText: async () => {
+        throw new Error("text prompt should not be used");
+      },
+      write: () => {},
+      connectDaemon: async () =>
+        createClient({
+          catalog: [apiKeyEntry({ models: [] })],
+          setProvider: async (input) => {
+            setCalls.push(input);
+            return {
+              requestId: "set-1",
+              success: true,
+              provider: {
+                name: input.name,
+                providerType: input.providerType,
+                models: [],
+                auth: { kind: "api_key", configured: true, source: "literal" },
+                available: true,
+                error: null,
+              },
+              error: null,
+            };
+          },
+        }),
+    });
+
+    expect(setCalls).toEqual([
+      {
+        name: "alpha-key",
+        providerType: "alpha-key",
+        options: {
+          apiKey: "stdin-secret",
+        },
+      },
+    ]);
+    expect(result.data).toMatchObject({
+      name: "alpha-key",
+      auth: "Connected",
+      available: "yes",
+      models: "-",
+    });
   });
 
   it("runs browser OAuth locally and pushes the credential to the selected daemon", async () => {
@@ -322,7 +373,7 @@ describe("provider add", () => {
                 provider: {
                   name: input.name,
                   providerType: input.providerType,
-                  models: input.options.models,
+                  models: input.options.models ?? [],
                   auth: { kind: "oauth", configured: false },
                   available: false,
                   error: null,
@@ -493,7 +544,7 @@ describe("provider add", () => {
           provider: {
             name: input.name,
             providerType: input.providerType,
-            models: input.options.models,
+            models: input.options.models ?? [],
             auth: { kind: "api_key", configured: true, source: "literal" },
             available: true,
             error: null,
@@ -522,6 +573,34 @@ describe("provider add", () => {
       expect.objectContaining({ name: "same-name", providerType: "alpha-key" }),
       expect.objectContaining({ name: "same-name", providerType: "alpha-key" }),
     ]);
+  });
+
+  it("mentions known provider ids for an unknown catalog id", async () => {
+    await expect(
+      runAddCommand("missing-key", {}, {} as never, {
+        promptSecret: async () => {
+          throw new Error("prompt should not run");
+        },
+        promptText: async () => {
+          throw new Error("text prompt should not run");
+        },
+        readStdin: async () => {
+          throw new Error("stdin should not run");
+        },
+        write: () => {},
+        connectDaemon: async () =>
+          createClient({
+            catalog: [apiKeyEntry({ id: "alpha-key" }), apiKeyEntry({ id: "gamma-key" })],
+            setProvider: async () => {
+              throw new Error("set should not run");
+            },
+          }),
+      }),
+    ).rejects.toMatchObject({
+      code: "UNKNOWN_PROVIDER",
+      message:
+        'Unknown model provider type "missing-key". Known provider ids: alpha-key, gamma-key.',
+    });
   });
 
   it("requires the catalog feature flag before reading the catalog", async () => {
@@ -601,7 +680,7 @@ describe("provider add", () => {
               provider: {
                 name: input.name,
                 providerType: input.providerType,
-                models: input.options.models,
+                models: input.options.models ?? [],
                 auth: { kind: "api_key", configured: true, source: "literal" },
                 available: true,
                 error: null,

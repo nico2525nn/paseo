@@ -585,11 +585,19 @@ export class ProviderSnapshotManager {
         defaultModeId: definition?.defaultModeId ?? null,
       };
 
-      if (!definition?.enabled || !current || current.status === "loading") {
+      if (!definition?.enabled) {
         entries.set(provider, {
           ...metadata,
           status: "unavailable",
           enabled: definition?.enabled ?? true,
+        });
+        continue;
+      }
+
+      if (!current || current.status === "loading") {
+        entries.set(provider, {
+          ...metadata,
+          status: "loading",
         });
         continue;
       }

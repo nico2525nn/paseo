@@ -121,6 +121,22 @@ describe("paseo-agent-settings-sheet-model", () => {
     });
   });
 
+  it("omits model overrides when the catalog has no defaults", () => {
+    expect(
+      createPaseoAgentProviderInput({
+        entry: catalogEntry({ models: [] }),
+        name: "alpha-main",
+        apiKey: "alpha-secret",
+      }),
+    ).toEqual({
+      name: "alpha-main",
+      providerType: "catalog-alpha",
+      options: {
+        apiKey: "alpha-secret",
+      },
+    });
+  });
+
   it("builds a generic provider payload with an env reference for an empty key", () => {
     expect(
       createPaseoAgentProviderInput({

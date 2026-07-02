@@ -110,6 +110,27 @@ describe("PaseoAgentConfigService", () => {
     expect(JSON.stringify(presentService.getProviders())).not.toContain("sk-env-secret");
   });
 
+  test("reports configured API-key providers as available even without exposed models", () => {
+    const service = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+    });
+
+    service.setProvider({
+      name: "openrouter",
+      providerType: "openrouter",
+      options: {
+        apiKey: "sk-test",
+      },
+    });
+
+    expect(service.getProviders().providers[0]).toMatchObject({
+      auth: { kind: "api_key", configured: true, source: "literal" },
+      models: [],
+      available: true,
+    });
+  });
+
   test("rejects an unknown provider type with a clear error and persists nothing", () => {
     const service = new PaseoAgentConfigService({
       paseoHome: home,

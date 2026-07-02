@@ -336,6 +336,7 @@ export async function runPaseoCli(
     timeout?: number;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    stdin?: string;
   },
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const timeout = options?.timeout ?? 60000;
@@ -354,7 +355,7 @@ export async function runPaseoCli(
         ...options?.env,
       },
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options?.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
 
@@ -368,6 +369,10 @@ export async function runPaseoCli(
     proc.stderr?.on("data", (data) => {
       appendOutputCapture(stderr, data);
     });
+
+    if (options?.stdin !== undefined) {
+      proc.stdin?.end(options.stdin);
+    }
 
     const timeoutId = setTimeout(() => {
       if (proc.pid) {
@@ -406,7 +411,7 @@ export async function createE2ETestContext(options?: {
     /** Run a paseo CLI command against this daemon */
     paseo: (
       args: string[],
-      opts?: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv },
+      opts?: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv; stdin?: string },
     ) => Promise<{
       exitCode: number;
       stdout: string;
@@ -418,7 +423,7 @@ export async function createE2ETestContext(options?: {
 
   const paseo = (
     args: string[],
-    opts?: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv },
+    opts?: { timeout?: number; cwd?: string; env?: NodeJS.ProcessEnv; stdin?: string },
   ) => runPaseoCli(ctx, args, opts);
 
   return {

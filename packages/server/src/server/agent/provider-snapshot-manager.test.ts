@@ -1020,6 +1020,65 @@ describe("ProviderSnapshotManager applyMutableProviderConfig", () => {
 });
 
 describe("ProviderSnapshotManager applyPaseoAgentConfig", () => {
+  test("keeps unrelated provider loading state when Paseo Agent config changes", async () => {
+    let resolveFetchStarted: (() => void) | undefined;
+    let releaseFetch: (() => void) | undefined;
+    const fetchStarted = new Promise<void>((resolveStarted) => {
+      resolveFetchStarted = resolveStarted;
+    });
+    const fetchRelease = new Promise<void>((resolveRelease) => {
+      releaseFetch = resolveRelease;
+    });
+    const manager = new ProviderSnapshotManager({
+      logger: createTestLogger(),
+      providerOverrides: {
+        codex: { enabled: false },
+        copilot: { enabled: false },
+        opencode: { enabled: false },
+        pi: { enabled: false },
+        omp: { enabled: false },
+      },
+      extraClients: {
+        claude: createExtraClient("claude", {
+          async isAvailable() {
+            return true;
+          },
+          async fetchCatalog() {
+            resolveFetchStarted?.();
+            await fetchRelease;
+            return { models: [] as AgentModelDefinition[], modes: [] as AgentMode[] };
+          },
+        }),
+      },
+      paseoAgentConfig: {},
+    });
+    try {
+      manager.getSnapshot();
+      await fetchStarted;
+
+      manager.applyPaseoAgentConfig({
+        providers: {
+          "openrouter-main": {
+            type: "openrouter",
+            options: {
+              apiKey: "sk-test",
+              models: [{ id: "anthropic/claude-3.7-sonnet", label: "Claude" }],
+            },
+          },
+        },
+      });
+
+      expect(manager.getSnapshot().find((entry) => entry.provider === "claude")).toMatchObject({
+        provider: "claude",
+        status: "loading",
+        enabled: true,
+      });
+    } finally {
+      releaseFetch?.();
+      manager.destroy();
+    }
+  });
+
   test("refreshes Paseo Agent models without daemon restart", async () => {
     const manager = new ProviderSnapshotManager({
       logger: createTestLogger(),

@@ -165,9 +165,9 @@ function redactedProviders(
     const provider: RedactedPaseoAgentProviderConfig = {
       name,
       providerType: catalogEntry.id,
-      models: models.map((model) => ({ ...model })),
+      models: models.map((model) => Object.assign({}, model)),
       auth,
-      available: auth.configured && models.length > 0,
+      available: auth.configured,
       error: null,
     };
     provider.baseUrl = settings.baseUrl;

@@ -36,9 +36,10 @@ The current catalog contains four entries:
 | `kimi`        | `kimi-coding`  | Pi full list   | Paseo hint `KIMI_API_KEY` (Pi has no env key) |
 | `opencode-go` | `opencode-go`  | Pi full list   | Paseo hint `OPENCODE_API_KEY`                 |
 
-OpenRouter intentionally has no default model because Pi's OpenRouter registry is large;
-users must choose explicit model ids. The other catalog entries expose Pi's bundled model
-list unless an instance sets `options.models`.
+OpenRouter intentionally has no default model because Pi's OpenRouter registry is large.
+Users can store the OpenRouter credential first, but they must choose explicit model ids
+before running Paseo Agent through that provider. The other catalog entries expose Pi's
+bundled model list unless an instance sets `options.models`.
 
 ## Config shape
 
@@ -89,9 +90,9 @@ Most options are overrides over Pi-derived provider data:
   references count only when every referenced env var is set in the daemon environment.
 - `baseUrl`, `api`, `headers`, and `authHeader` override or extend the Pi-derived request
   config.
-- `models[]` is an instance override. Omit it to use that entry's default policy. A model
-  may override `api` when a single backend serves mixed protocols or when Pi has no data
-  for a custom id.
+- `models[]` is an instance override. Omit it to use that entry's default policy, which
+  can be an empty list for catalog entries such as OpenRouter. A model may override `api`
+  when a single backend serves mixed protocols or when Pi has no data for a custom id.
 - `refreshToken` is an advanced OAuth seed path. Prefer the OAuth store described below.
 
 Env references make config portable: `config.json` can be copied between machines while
@@ -108,10 +109,14 @@ explicit session model wins, then the selected agent definition's model, then
 API-key providers use the catalog auth metadata plus the configured `apiKey` expression.
 Redacted provider responses include an optional `auth` state:
 
-- `Connected` means the key or credential is configured and at least one model is exposed.
+- `Connected` means the key or credential expression resolves locally. It does not make a
+  network call, so a fake literal key still reports connected until a real session uses it.
 - `Needs attention` means the instance exists but the auth expression does not currently
   resolve, the OAuth store binding does not match, or another auth precondition is missing.
 - `not configured` is used by older/no-auth responses.
+
+The redacted provider `available` flag mirrors local credential availability. The Paseo
+Agent runtime still needs at least one exposed model before it can start a session.
 
 Secrets are not returned in catalog responses, redacted provider responses, or CLI table
 output.

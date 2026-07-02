@@ -1,11 +1,18 @@
 import type { Command } from "commander";
-import type { CommandOptions, ListResult, OutputSchema } from "../../output/index.js";
+import {
+  renderTable,
+  renderTableHeader,
+  type CommandOptions,
+  type ListResult,
+  type OutputSchema,
+} from "../../output/index.js";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type {
   PaseoAgentCatalogEntry,
   RedactedPaseoAgentProviderConfig,
 } from "@getpaseo/protocol/messages";
 import { connectToDaemon } from "../../utils/client.js";
+import { requirePaseoAgentCatalogFeature } from "./feature.js";
 
 export interface ProviderListItem {
   name: string;
@@ -39,24 +46,18 @@ export const providerLsSchema: OutputSchema<ProviderListItem> = {
     { header: "AVAILABLE", field: "available", width: 10 },
     { header: "MODELS", field: "models", width: 30 },
   ],
+  renderHuman: (result, options) => {
+    if (result.type === "list" && result.data.length === 0) {
+      return options.noHeaders ? "" : renderTableHeader(providerLsSchema, options);
+    }
+    return renderTable(result, options);
+  },
 };
 
 export type ProviderLsResult = ListResult<ProviderListItem>;
 
 export interface ProviderLsOptions extends CommandOptions {
   host?: string;
-}
-
-function requirePaseoAgentCatalogFeature(
-  client: Pick<DaemonClient, "getLastServerInfoMessage">,
-): void {
-  if (client.getLastServerInfoMessage()?.features?.paseoAgentCatalog === true) {
-    return;
-  }
-  throw {
-    code: "HOST_UPDATE_REQUIRED",
-    message: "Update the Paseo daemon to use this command.",
-  };
 }
 
 function authState(provider: RedactedPaseoAgentProviderConfig): string {

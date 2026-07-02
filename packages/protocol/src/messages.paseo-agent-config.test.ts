@@ -19,6 +19,20 @@ describe("Paseo Agent config RPC schemas", () => {
     expect(parsed.providerType).toBe("openrouter");
   });
 
+  test("parses provider config requests without model overrides", () => {
+    const parsed = SessionInboundMessageSchema.parse({
+      type: "config.paseo_agent.set_provider.request",
+      requestId: "req-set-openrouter",
+      name: "openrouter",
+      providerType: "openrouter",
+      options: {
+        apiKey: "sk-test",
+      },
+    });
+
+    expect(parsed.options.models).toBeUndefined();
+  });
+
   test("parses a provider type this client has never heard of (new daemon, old client)", () => {
     const parsed = SessionOutboundMessageSchema.parse({
       type: "config.paseo_agent.get_providers.response",
