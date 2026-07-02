@@ -1922,15 +1922,11 @@ export const ListProviderFeaturesRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
-const PaseoAgentProviderTypeSchema = z.enum([
-  "openrouter",
-  "openai",
-  "anthropic",
-  "opencode",
-  "openai-compatible",
-  "openai-codex",
-  "custom",
-]);
+// Open on the wire on purpose: the daemon's paseo-agent config schema owns the
+// closed set of known types. A new type added daemon-side must not break an
+// older client's envelope parse (protocol contract: never narrow, old clients
+// keep parsing new daemons).
+const PaseoAgentProviderTypeSchema = z.string().min(1);
 
 const PaseoAgentProviderModelConfigSchema = z
   .object({
@@ -1978,15 +1974,7 @@ export const PaseoAgentProviderAuthStateSchema = z
 export const RedactedPaseoAgentProviderConfigSchema = z
   .object({
     name: z.string().min(1),
-    providerType: z.enum([
-      "openrouter",
-      "openai",
-      "anthropic",
-      "opencode",
-      "openai-compatible",
-      "openai-codex",
-      "custom",
-    ]),
+    providerType: PaseoAgentProviderTypeSchema,
     baseUrl: z.string().optional(),
     api: z.string().optional(),
     models: z.array(PaseoAgentProviderModelConfigSchema),
@@ -2468,7 +2456,7 @@ export const ServerInfoStatusPayloadSchema = z
         daemonSelfUpdate: z.boolean().optional(),
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: z.boolean().optional(),
-        // COMPAT(paseoAgentConfig): added in v0.1.85, remove gate after 2026-11-30.
+        // COMPAT(paseoAgentConfig): added in v0.1.103, remove gate after 2027-01-02.
         paseoAgentConfig: z.boolean().optional(),
       })
       .optional(),

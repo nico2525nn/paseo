@@ -44,6 +44,16 @@ const PROVIDER_TYPES = [
 
 export type PaseoAgentProviderType = (typeof PROVIDER_TYPES)[number];
 
+// The wire schema is an open string (protocol back-compat); the daemon owns
+// the closed set. Use this to gate incoming provider types with a clear error.
+export function isPaseoAgentProviderType(value: string): value is PaseoAgentProviderType {
+  return (PROVIDER_TYPES as readonly string[]).includes(value);
+}
+
+export function knownPaseoAgentProviderTypes(): readonly string[] {
+  return PROVIDER_TYPES;
+}
+
 export interface PaseoAgentProviderTypeDefault {
   /** Pi wire protocol. `undefined` for `custom`, where the user must pick one. */
   api?: string;

@@ -4,8 +4,9 @@ Paseo Agent is a built-in agent provider that runs Pi's coding-agent harness **i
 
 The provider id is **`paseo`** (the display name is "Paseo Agent"). Use it like any other agent provider, e.g. `paseo run --provider paseo --model <modelProviderName>/<modelId> ...`.
 
-This is a prototype. There is no app UI yet. OpenRouter and ChatGPT setup have CLI
-paths; other provider setup is still config-file based.
+This is a prototype. The app Settings sheet can add OpenRouter model providers;
+ChatGPT login and OpenRouter setup also have CLI paths. Other model provider
+types are still config-file based.
 
 > Smoke note: the daemon supervisor runs from `packages/server/dist`. After changing
 > provider/config code, run `npm run build:server` (or run a source/dev daemon) before

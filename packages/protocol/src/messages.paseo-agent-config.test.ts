@@ -19,6 +19,29 @@ describe("Paseo Agent config RPC schemas", () => {
     expect(parsed.providerType).toBe("openrouter");
   });
 
+  test("parses a provider type this client has never heard of (new daemon, old client)", () => {
+    const parsed = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.get_providers.response",
+      payload: {
+        requestId: "req-get-future",
+        defaultModel: null,
+        providers: [
+          {
+            name: "kimi-main",
+            providerType: "kimi-coding",
+            models: [{ id: "kimi-k3" }],
+            auth: { kind: "api_key", configured: true, source: "env" },
+            available: true,
+            error: null,
+          },
+        ],
+        error: null,
+      },
+    });
+
+    expect(parsed.payload.providers[0]?.providerType).toBe("kimi-coding");
+  });
+
   test("parses redacted provider responses without raw secret fields", () => {
     const parsed = SessionOutboundMessageSchema.parse({
       type: "config.paseo_agent.get_providers.response",

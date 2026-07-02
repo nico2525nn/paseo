@@ -8,7 +8,9 @@ import { addJsonAndDaemonHostOptions } from "../../utils/command-options.js";
 export function createProviderCommand(
   dependencies: Parameters<typeof runAddOpenRouterCommand>[3] = {},
 ): Command {
-  const provider = new Command("provider").description("Manage agent providers");
+  const provider = new Command("provider").description(
+    "Manage agent providers (ls, models) and Paseo Agent model providers (add)",
+  );
 
   addJsonAndDaemonHostOptions(
     provider.command("ls").description("List available providers and status"),
@@ -22,7 +24,7 @@ export function createProviderCommand(
       .option("--thinking", "Include thinking option IDs for each model"),
   ).action(withOutput(runModelsCommand));
 
-  const add = provider.command("add").description("Configure a provider");
+  const add = provider.command("add").description("Configure a Paseo Agent model provider");
   addJsonAndDaemonHostOptions(addOpenRouterOptions(add.command("openrouter"))).action(
     withOutput<Awaited<ReturnType<typeof runAddOpenRouterCommand>>["data"], [string]>(
       (name, options, command) => runAddOpenRouterCommand(name, options, command, dependencies),

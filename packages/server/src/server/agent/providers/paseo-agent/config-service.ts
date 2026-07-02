@@ -13,7 +13,8 @@ import {
 import {
   PaseoAgentConfigSchema,
   type PaseoAgentConfig,
-  type PaseoAgentProviderType,
+  isPaseoAgentProviderType,
+  knownPaseoAgentProviderTypes,
   resolvePaseoAgentProviderTypeDefaults,
 } from "./config.js";
 import { hasStoredOAuthCredential, storeCodexOAuthCredential } from "./oauth-store.js";
@@ -29,7 +30,7 @@ interface PaseoAgentConfigServiceOptions {
 
 interface SetProviderInput {
   name: string;
-  providerType: PaseoAgentProviderType;
+  providerType: string;
   options: {
     apiKey?: string;
     baseUrl?: string;
@@ -163,6 +164,11 @@ export class PaseoAgentConfigService {
   }
 
   setProvider(input: SetProviderInput): RedactedPaseoAgentProviderConfig {
+    if (!isPaseoAgentProviderType(input.providerType)) {
+      throw new Error(
+        `Unknown model provider type "${input.providerType}". Known types: ${knownPaseoAgentProviderTypes().join(", ")}. Update the host if this type is newer than it.`,
+      );
+    }
     const next = this.updateConfig((current) =>
       PaseoAgentConfigSchema.parse({
         ...current,

@@ -55,6 +55,22 @@ describe("PaseoAgentConfigService", () => {
     );
   });
 
+  test("rejects an unknown provider type with a clear error and persists nothing", () => {
+    const service = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+    });
+
+    expect(() =>
+      service.setProvider({
+        name: "future-main",
+        providerType: "kimi-coding",
+        options: { apiKey: "sk-test", models: [{ id: "kimi-k3" }] },
+      }),
+    ).toThrow(/Unknown model provider type "kimi-coding". Known types: openrouter/);
+    expect(loadPersistedConfig(home).agents?.paseo?.providers).toBeUndefined();
+  });
+
   test("preserves shared config fields when writing agents.paseo", () => {
     const logger = createTestLogger();
     savePersistedConfig(

@@ -1225,7 +1225,7 @@ export class VoiceAssistantWebSocketServer {
         daemonSelfUpdate: true,
         // COMPAT(agentForkContext): added in v0.1.102, remove gate after 2026-12-28.
         agentForkContext: true,
-        // COMPAT(paseoAgentConfig): added in v0.1.85, remove gate after 2026-11-30.
+        // COMPAT(paseoAgentConfig): added in v0.1.103, remove gate after 2027-01-02.
         paseoAgentConfig: true,
       },
     };
