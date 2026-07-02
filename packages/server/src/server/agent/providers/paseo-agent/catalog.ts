@@ -55,7 +55,7 @@ export const PASEO_AGENT_PROVIDER_CATALOG = [
     api: "openai-codex-responses",
     baseUrl: "https://chatgpt.com/backend-api",
     auth: { kind: "oauth", flow: "openai-codex" },
-    models: [{ id: "gpt-5.3-codex", reasoning: true }],
+    models: [{ id: "gpt-5.4-mini", reasoning: true }],
   },
   {
     id: "kimi",

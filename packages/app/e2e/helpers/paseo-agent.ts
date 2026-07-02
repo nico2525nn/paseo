@@ -101,7 +101,7 @@ export async function seedChatGptProvider(providerName: string): Promise<void> {
       name: providerName,
       providerType: "chatgpt",
       options: {
-        models: [{ id: "gpt-5.3-codex", reasoning: true }],
+        models: [{ id: "gpt-5.4-mini", reasoning: true }],
       },
     });
     await client.storePaseoAgentOAuthCredential({

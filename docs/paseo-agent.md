@@ -1,18 +1,312 @@
 # Paseo Agent provider
 
-Paseo Agent is a built-in agent provider that runs Pi's coding-agent harness **in process** (no `pi` CLI, no `~/.pi` discovery). It is configured entirely by Paseo-owned config under `agents.paseo` in `$PASEO_HOME/config.json`. The model backends are **model providers** (see [glossary.md](glossary.md)): one or more typed entries, each pointing at an API with its own key and models.
+Paseo Agent is the built-in agent provider that runs Pi's coding-agent harness **in
+process** (no `pi` CLI, no `~/.pi` discovery). Its provider id is **`paseo`** and its
+model backends are configured under `agents.paseo` in `$PASEO_HOME/config.json`.
 
-The provider id is **`paseo`** (the display name is "Paseo Agent"). Use it like any other agent provider, e.g. `paseo run --provider paseo --model <modelProviderName>/<modelId> ...`.
+Use it like any other agent provider:
 
-This is a prototype. The app Settings sheet can add OpenRouter model providers;
-ChatGPT login and OpenRouter setup also have CLI paths. Other model provider
-types are still config-file based.
+```bash
+paseo run --provider paseo --model <providerInstance>/<modelId> "Reply with pong"
+```
+
+Example: `--model openrouter/openai/gpt-4o-mini` selects the `openrouter` provider
+instance and the `openai/gpt-4o-mini` model exposed by that instance.
 
 > Smoke note: the daemon supervisor runs from `packages/server/dist`. After changing
 > provider/config code, run `npm run build:server` (or run a source/dev daemon) before
-> smoking, otherwise a stale `dist` may reject the `agents.paseo` config. Always pass
+> smoking, otherwise stale `dist` may reject or omit `agents.paseo` behavior. Always pass
 > `--host <addr>` to CLI smoke commands so they hit your isolated daemon, not the real
 > daemon on `:6767`.
+
+## Provider catalog
+
+Paseo Agent model providers are catalog-driven. `catalog.ts` is the source of truth for
+which provider types the daemon knows how to configure. A catalog entry is data only:
+id, label, wire API, base URL, optional headers, auth metadata, and optional default
+models. The app picker, CLI setup, config RPCs, runtime provider resolution, and auth
+state all use that same data.
+
+The current catalog contains four entries:
+
+| id            | label            | api                      | base URL                          | auth                          |
+| ------------- | ---------------- | ------------------------ | --------------------------------- | ----------------------------- |
+| `openrouter`  | OpenRouter       | `openai-completions`     | `https://openrouter.ai/api/v1`    | API key, `OPENROUTER_API_KEY` |
+| `chatgpt`     | ChatGPT          | `openai-codex-responses` | `https://chatgpt.com/backend-api` | OAuth, `openai-codex` flow    |
+| `kimi`        | Kimi Coding Plan | `anthropic-messages`     | `https://api.kimi.com/coding`     | API key, `KIMI_API_KEY`       |
+| `opencode-go` | OpenCode Go      | `openai-completions`     | `https://opencode.ai/zen/go/v1`   | API key, `OPENCODE_API_KEY`   |
+
+Only `chatgpt` ships with a default model (`gpt-5.4-mini`). API-key providers currently
+require at least one explicit `--model` or `options.models[]` entry.
+
+## Config shape
+
+`agents.paseo.providers` is structurally generic. Provider instance names are free-form
+keys; provider types are catalog ids. That means you can use the catalog id as the
+default instance name, or create several instances of the same type with different
+models, keys, or base URLs.
+
+```jsonc
+{
+  "agents": {
+    "paseo": {
+      "defaultAgent": "orchestrator",
+      "defaultModel": "openrouter-main/openai/gpt-4o-mini",
+      "providers": {
+        "openrouter-main": {
+          "type": "openrouter",
+          "options": {
+            "apiKey": "$OPENROUTER_API_KEY",
+            "models": [
+              { "id": "openai/gpt-4o-mini", "label": "GPT-4o mini" },
+              { "id": "anthropic/claude-3.7-sonnet", "reasoning": true },
+            ],
+          },
+        },
+        "chatgpt": {
+          "type": "chatgpt",
+          "options": {
+            "models": [{ "id": "gpt-5.4-mini", "reasoning": true }],
+          },
+        },
+        "kimi": {
+          "type": "kimi",
+          "options": {
+            "apiKey": "$KIMI_API_KEY",
+            "models": [{ "id": "k2p7" }],
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+The provider entry shape is:
+
+```jsonc
+{
+  "type": "openrouter",
+  "options": {
+    "apiKey": "$OPENROUTER_API_KEY",
+    "baseUrl": "https://...",
+    "api": "openai-completions",
+    "headers": { "X-Example": "value" },
+    "authHeader": true,
+    "refreshToken": "$CHATGPT_REFRESH_TOKEN",
+    "models": [
+      {
+        "id": "provider/model-id",
+        "label": "Readable label",
+        "api": "anthropic-messages",
+        "reasoning": true,
+        "contextWindow": 128000,
+        "maxTokens": 16384,
+      },
+    ],
+  },
+}
+```
+
+Most options are overrides for the catalog entry:
+
+- `apiKey` may be omitted for API-key providers. Omitted means "use the catalog env var"
+  such as `OPENROUTER_API_KEY`.
+- `apiKey` may also be a literal key, `$ENV`, `${ENV}`, or `!command` expression. Paseo
+  mirrors Pi's config-value semantics: literals and commands count as configured; env
+  references count only when every referenced env var is set in the daemon environment.
+- `baseUrl`, `api`, `headers`, and `authHeader` override or extend catalog defaults.
+- `models[]` exposes the model ids usable as `<providerInstance>/<modelId>`. A model may
+  override `api` when a single backend serves mixed protocols.
+- `refreshToken` is an advanced OAuth seed path. Prefer the OAuth store described below.
+
+Env references make config portable: `config.json` can be copied between machines while
+the secret stays in that machine's daemon environment or keychain command.
+
+`defaultModel` is optional and uses the same `<providerInstance>/<modelId>` form. An
+explicit session model wins, then the selected agent definition's model, then
+`agents.paseo.defaultModel`, then Pi's first available model.
+
+`defaultProfile` is still accepted as a legacy alias for `defaultAgent`.
+
+## Authentication
+
+API-key providers use the catalog auth metadata plus the configured `apiKey` expression.
+Redacted provider responses include an optional `auth` state:
+
+- `Connected` means the key or credential is configured and at least one model is exposed.
+- `Needs attention` means the instance exists but the auth expression does not currently
+  resolve, the OAuth store binding does not match, or another auth precondition is missing.
+- `not configured` is used by older/no-auth responses.
+
+Secrets are not returned in catalog responses, redacted provider responses, or CLI table
+output.
+
+### OAuth store
+
+OAuth credentials live in Paseo's store, not in another tool's auth file:
+
+```text
+$PASEO_HOME/paseo-agent/auth.json
+```
+
+The store is created through Pi's `AuthStorage`. The parent directory is private and the
+file is written mode `0600`; Pi also re-chmods on write. During a Paseo Agent session,
+Pi reads the credential, refreshes expired access tokens, and persists refresh-token
+rotation back into the same Paseo-owned file.
+
+Stored OAuth credentials are bound to the provider instance's `{ flow, baseUrl }`. If the
+catalog flow or configured base URL changes, the old credential is left on disk but the
+provider reports `Needs attention` until it is authorized again. This prevents a token
+for one OAuth target from silently being used against another.
+
+The OAuth implementation uses Pi's OAuth registry. Catalog OAuth entries are limited to
+flows that registry knows about: `openai-codex`, `anthropic`, and `github-copilot`.
+The current catalog only uses `openai-codex` for `chatgpt`.
+
+## CLI setup
+
+The provider CLI talks to the selected daemon. Always pass `--host` when smoking an
+isolated daemon.
+
+Actual help text:
+
+```text
+Usage: paseo provider add [options] [id]
+
+Configure a Paseo Agent model provider
+
+Arguments:
+  id                     Catalog provider id; omit to choose interactively
+
+Options:
+  --name <instanceName>  Provider instance name (default: provider id)
+  --model <id>           Model ID to expose (repeatable, comma-separated;
+                         defaults to catalog models) (default: [])
+  --api-key-stdin        Read API key from stdin
+  --device-code          Use daemon-run device-code OAuth instead of browser
+                         OAuth
+  --json                 Output in JSON format
+  --host <host>          Daemon host target: host:port or
+                         tcp://host:port?ssl=true&password=secret (default:
+                         local socket/pipe, then localhost:6767)
+  -h, --help             display help for command
+```
+
+```text
+Usage: paseo provider ls [options]
+
+List configured Paseo Agent model providers
+
+Options:
+  --json         Output in JSON format
+  --host <host>  Daemon host target: host:port or
+                 tcp://host:port?ssl=true&password=secret (default: local
+                 socket/pipe, then localhost:6767)
+  -h, --help     display help for command
+```
+
+```text
+Usage: paseo provider rm [options] <name>
+
+Remove a Paseo Agent model provider
+
+Arguments:
+  name           Provider instance name
+
+Options:
+  --json         Output in JSON format
+  --host <host>  Daemon host target: host:port or
+                 tcp://host:port?ssl=true&password=secret (default: local
+                 socket/pipe, then localhost:6767)
+  -h, --help     display help for command
+```
+
+Examples:
+
+```bash
+printf '%s\n' "$OPENROUTER_API_KEY" |
+  paseo provider add \
+    openrouter \
+    --api-key-stdin \
+    --model openai/gpt-4o-mini \
+    --host 127.0.0.1:7911
+```
+
+```bash
+paseo provider add kimi \
+  --model k2p7 \
+  --host 127.0.0.1:7911
+# Press Enter at the API-key prompt to store "$KIMI_API_KEY".
+```
+
+```bash
+paseo provider add chatgpt --device-code --host 127.0.0.1:7911
+```
+
+Without an `[id]`, `provider add` prints the catalog and prompts for a selection. For
+API-key providers it writes the configured key expression into `config.json`. For OAuth
+providers it first writes the provider config, then stores the OAuth credential in the
+daemon's Paseo-owned auth store.
+
+`provider add` is idempotent for the same instance name: running it again updates the
+existing entry instead of creating a duplicate. `provider rm <name>` removes only that
+provider instance and clears `defaultModel` if it pointed at the removed instance.
+
+## App setup
+
+The app uses the same catalog and config RPCs as the CLI. In Settings, open the host
+settings, then the Paseo Agent provider section. The app fetches the catalog from the
+connected daemon, shows catalog entries in the picker, and renders either an API-key
+form or an OAuth sign-in flow from the entry's `auth.kind`.
+
+Configured rows show the redacted provider state from the daemon: label, provider type,
+models, availability, and auth state. The app gates this UI on
+`server_info.features.paseoAgentCatalog`; older daemons show an update-host affordance
+instead of trying to synthesize the feature through older RPCs.
+
+## Wire surface
+
+The catalog surface is gated by:
+
+```text
+server_info.features.paseoAgentCatalog
+```
+
+RPC names use dotted namespaces:
+
+| request                                             | response                                             |
+| --------------------------------------------------- | ---------------------------------------------------- |
+| `config.paseo_agent.get_catalog.request`            | `config.paseo_agent.get_catalog.response`            |
+| `config.paseo_agent.get_providers.request`          | `config.paseo_agent.get_providers.response`          |
+| `config.paseo_agent.set_provider.request`           | `config.paseo_agent.set_provider.response`           |
+| `config.paseo_agent.remove_provider.request`        | `config.paseo_agent.remove_provider.response`        |
+| `config.paseo_agent.oauth.start.request`            | `config.paseo_agent.oauth.start.response`            |
+| `config.paseo_agent.oauth.complete.request`         | `config.paseo_agent.oauth.complete.response`         |
+| `config.paseo_agent.oauth.store_credential.request` | `config.paseo_agent.oauth.store_credential.response` |
+
+Protocol strings are intentionally open. Provider ids, auth kinds, OAuth flow names, and
+wire API names are strings, not closed enums. Old clients can parse new catalog entries,
+and new clients can show "update host" only when the daemon lacks the catalog feature.
+
+## Adding a catalog entry
+
+Adding a new model-provider type should be a data change:
+
+1. Add one entry to `PASEO_AGENT_PROVIDER_CATALOG` in
+   `packages/server/src/server/agent/providers/paseo-agent/catalog.ts`.
+2. Set `id`, `label`, `api`, `baseUrl`, `auth`, and any provider-level `headers`.
+3. Add default `models[]` only when there is a safe, broadly usable default. Otherwise
+   leave it empty so CLI/app users must choose a model id.
+4. Use `auth: { kind: "api_key", envVar: "..." }` for key-backed providers.
+5. Use `auth: { kind: "oauth", flow: "..." }` only for flows supported by Pi's OAuth
+   registry (`openai-codex`, `anthropic`, `github-copilot`).
+6. Add or update focused tests around catalog copying, provider resolution, auth state,
+   and CLI/app rendering if the new entry exercises a new shape.
+
+Do not add provider-specific branches in the runtime, CLI, or app. The catalog entry is
+what unlocks CLI setup, app setup, redacted provider state, config persistence, and model
+addressing.
 
 ## MCP tools
 
@@ -25,7 +319,7 @@ back to the model. Connections are torn down on session close. Servers that fail
 connect or list are logged and skipped rather than failing the session.
 
 Transports: HTTP (streamable) is the primary path (the injected `paseo` server is HTTP);
-SSE and stdio transports are also wired via the MCP SDK. No extra config is needed — MCP
+SSE and stdio transports are also wired via the MCP SDK. No extra config is needed: MCP
 servers come from Paseo's normal injection/config, not from `agents.paseo`.
 
 ## Agent definitions
@@ -40,7 +334,7 @@ agents. Reusable partials can live anywhere under `$PASEO_HOME/agents`.
   "agents": {
     "paseo": {
       "defaultAgent": "orchestrator",
-      "defaultModel": "openrouter-main/anthropic/claude-3.7-sonnet",
+      "defaultModel": "openrouter-main/openai/gpt-4o-mini",
       "providers": {},
     },
   },
@@ -55,7 +349,7 @@ name: Orchestrator
 description: Coordinates work through Paseo-managed agents
 prompt: extend
 mcp: [paseo]
-model: openrouter-main/anthropic/claude-3.7-sonnet
+model: openrouter-main/openai/gpt-4o-mini
 tools: [read, grep, paseo__list_agents, paseo__create_agent]
 permissions:
   - tool: paseo__archive_*
@@ -96,196 +390,3 @@ tool preflight hook, so the policy applies to built-in, custom, and bridged MCP 
 `mcp: [paseo]` is an expectation check, not a new injection mechanism. The normal daemon
 MCP injection still supplies the actual server; if an agent declares an MCP server that
 is not present in the session's `mcpServers`, Paseo Agent logs a warning and continues.
-
-## Config shape
-
-```jsonc
-{
-  "agents": {
-    "paseo": {
-      // Optional. "<modelProviderName>/<modelId>". Used when an agent is
-      // started without an explicit model.
-      "defaultModel": "openrouter-main/anthropic/claude-3.7-sonnet",
-
-      // Optional. Loads $PASEO_HOME/agents/orchestrator.md by default for new
-      // Paseo Agent sessions.
-      "defaultAgent": "orchestrator",
-
-      // Legacy alias for defaultAgent. Still accepted for old configs.
-      "defaultProfile": "orchestrator",
-
-      // Model providers, keyed by instance name. Names are free-form; you may
-      // run several entries of the same type against different APIs/keys/models.
-      "providers": {
-        "openrouter-main": {
-          "type": "openrouter",
-          "options": {
-            // apiKey may be omitted to fall back to the type's env var
-            // (here OPENROUTER_API_KEY). It may also be a literal, an env
-            // reference like "$OPENROUTER_API_KEY" / "${OPENROUTER_API_KEY}",
-            // or a "!command" that prints the key.
-            "models": [
-              { "id": "anthropic/claude-3.7-sonnet", "label": "Claude 3.7", "reasoning": true },
-              { "id": "openai/gpt-4o", "label": "GPT-4o" },
-            ],
-          },
-        },
-      },
-    },
-  },
-}
-```
-
-## Supported types
-
-Each type supplies sensible defaults so you usually only provide an API key (or its
-env var) and model ids.
-
-| type                | wire `api`                  | default base URL                  | default key env var   |
-| ------------------- | --------------------------- | --------------------------------- | --------------------- |
-| `openrouter`        | `openai-completions`        | `https://openrouter.ai/api/v1`    | `OPENROUTER_API_KEY`  |
-| `openai`            | `openai-responses`          | `https://api.openai.com/v1`       | `OPENAI_API_KEY`      |
-| `anthropic`         | `anthropic-messages`        | `https://api.anthropic.com`       | `ANTHROPIC_API_KEY`   |
-| `opencode`          | `openai-completions`        | `https://opencode.ai/zen/v1`      | `OPENCODE_API_KEY`    |
-| `openai-compatible` | `openai-completions`        | _(required: `options.baseUrl`)_   | _(none — set apiKey)_ |
-| `openai-codex`      | `openai-codex-responses`    | `https://chatgpt.com/backend-api` | _(OAuth — see below)_ |
-| `custom`            | _(required: `options.api`)_ | _(required: `options.baseUrl`)_   | _(none — set apiKey)_ |
-
-Per-entry overrides live in `options`: `baseUrl`, `api`, `apiKey`, `headers`,
-`authHeader` (send `Authorization: Bearer <apiKey>`), and `models[]`. Each model may
-override `api` (e.g. an `anthropic-messages` model behind an otherwise
-`openai-completions` provider), plus `label`, `reasoning`, `contextWindow`, `maxTokens`.
-
-### OpenCode Zen / Go (OpenAI-compatible)
-
-OpenCode Zen models speak either `openai-completions` or `anthropic-messages`. Use the
-`opencode` type for Zen, or `openai-compatible` with an explicit base URL for Go, and
-override the per-model `api` where a model is Anthropic-family:
-
-```jsonc
-{
-  "type": "opencode",
-  "options": {
-    "models": [
-      { "id": "big-pickle" },
-      { "id": "claude-sonnet", "api": "anthropic-messages" }
-    ]
-  }
-}
-// OpenCode Go:
-{
-  "type": "openai-compatible",
-  "options": {
-    "baseUrl": "https://opencode.ai/zen/go/v1",
-    "apiKey": "$OPENCODE_API_KEY",
-    "models": [{ "id": "glm-5" }]
-  }
-}
-```
-
-Pi attaches its own `x-opencode-*` attribution headers automatically when the base URL
-is on `opencode.ai`, so you do not set those yourself.
-
-### `custom` escape hatch
-
-When a backend needs a wire protocol the named types don't cover, use `custom` and set
-`options.api` to a Pi wire protocol (e.g. `google-generative-ai`, `mistral-conversations`,
-`openai-codex-responses`) plus `options.baseUrl`. This is a thin pass-through, not a place
-to embed raw Pi internals.
-
-## Authentication
-
-- **API key / env var / command** — works for every type. Omit `apiKey` to use the
-  type's default env var; or set a literal, a `$ENV` reference, or a `!command`.
-- A provider only counts as "available" (and its models listable for use) when its
-  resolved key is actually present — a literal value, a set env var, or a command.
-
-### ChatGPT / OpenAI subscription (OAuth) — `openai-codex`
-
-The `openai-codex` type uses a ChatGPT/OpenAI **subscription** via OAuth instead of an
-API key, against `https://chatgpt.com/backend-api` with the `openai-codex-responses` wire
-API. Paseo **owns** the auth: `paseo login chatgpt` runs Pi's browser PKCE/callback
-OAuth flow by default, stores the credential in a Paseo-controlled file, and lets Pi
-refresh/rotate it there. Paseo does **not** read ChatGPT/Codex/OpenCode/Pi or any other
-tool's auth files.
-
-Config — just declare the provider and its models (no credential field):
-
-```jsonc
-{
-  "agents": {
-    "paseo": {
-      "providers": {
-        "chatgpt": {
-          "type": "openai-codex",
-          "options": { "models": [{ "id": "gpt-5.3-codex", "reasoning": true }] },
-        },
-      },
-    },
-  },
-}
-```
-
-> Use a model id that ChatGPT-account Codex supports — e.g. `gpt-5.3-codex` (live-verified),
-> or another Pi codex id like `gpt-5.2`, `gpt-5.4`, `gpt-5.4-mini`. The non-subscription id
-> `gpt-5-codex` is **not** accepted on a ChatGPT account (the backend returns a 400
-> "model is not supported when using Codex with a ChatGPT account").
-
-Then log in once (the credential is stored under the `chatgpt` provider instance):
-
-```bash
-paseo login chatgpt
-# Opens your browser to approve (OAuth PKCE + local callback on 127.0.0.1:1455).
-# If the browser can't open, the URL is printed to copy; you can also paste the code.
-```
-
-Headless machines (no browser) can use the device-code fallback:
-
-```bash
-paseo login chatgpt --device-code   # prints a URL + code to enter on another device
-```
-
-Both store the credential at `$PASEO_HOME/paseo-agent/auth.json` (mode `0600`, created by
-Pi's AuthStorage; pass `--home` to target a specific Paseo home). On each session the
-provider loads that credential, and Pi refreshes expired access tokens — persisting any
-rotated refresh token **back into Paseo's own file**. A codex provider counts as
-"available" once a credential is stored. Token values are never logged or printed.
-
-> **Rotation is handled within Paseo.** Because Paseo owns the store and Pi writes
-> refreshed tokens back to it, rotation does not break Paseo. Run `paseo login chatgpt`
-> again any time to re-authorize (e.g. after a long idle period or an explicit logout).
-
-**Advanced / manual override (not the normal path).** If you already hold your own refresh
-token you may set `options.refreshToken` to a literal, `"$ENV"`/`"${ENV}"`, or `"!command"`.
-It is seeded into the Paseo store at session start. This is for power users/automation; the
-normal path is `paseo login chatgpt`. Paseo still never reads another tool's auth files.
-
-Other OAuth providers (Anthropic Pro/Max, Copilot) remain unwired; for those you can pass a
-pre-obtained bearer token via `apiKey`/env where accepted (e.g. `ANTHROPIC_OAUTH_TOKEN`).
-
-## CLI setup
-
-Configure an OpenRouter provider through the selected daemon:
-
-```bash
-export OPENROUTER_API_KEY=...
-paseo provider add openrouter openrouter-main \
-  --model anthropic/claude-3.7-sonnet \
-  --host localhost:7777
-```
-
-For shell-history-safe key entry, pipe the key instead:
-
-```bash
-printf '%s\n' "$OPENROUTER_API_KEY" |
-  paseo provider add openrouter openrouter-main \
-    --api-key-stdin \
-    --model anthropic/claude-3.7-sonnet \
-    --host localhost:7777
-```
-
-`paseo login chatgpt --host <host>` runs browser OAuth on the CLI machine, then sends
-the returned credential to the selected daemon. The credential is stored in that daemon's
-`$PASEO_HOME/paseo-agent/auth.json`; token values are not printed. `--device-code` is
-currently local-only and is rejected when combined with `--host` until a daemon-run
-device-code RPC exists.

@@ -107,7 +107,7 @@ describe("listPaseoAgentModels", () => {
     const models = listPaseoAgentModels(
       PaseoAgentConfigSchema.parse({ providers: { chatgpt: { type: "chatgpt" } } }),
     );
-    expect(models.map((m) => m.id)).toEqual(["chatgpt/gpt-5.3-codex"]);
+    expect(models.map((m) => m.id)).toEqual(["chatgpt/gpt-5.4-mini"]);
   });
 
   it("marks the configured default model", () => {
@@ -179,7 +179,7 @@ describe("paseoAgentModelProviders", () => {
     expect(provider.config.apiKey).toBeUndefined();
     expect(provider.config.api).toBe("openai-codex-responses");
     expect(provider.config.baseUrl).toBe("https://chatgpt.com/backend-api");
-    expect(provider.config.models?.[0]?.id).toBe("gpt-5.3-codex");
+    expect(provider.config.models?.[0]?.id).toBe("gpt-5.4-mini");
   });
 
   it("lets instance models override catalog default models", async () => {
@@ -205,7 +205,7 @@ describe("paseoAgentModelProviders", () => {
       }),
     );
     expect(provider.oauth).toEqual({ flow: "openai-codex" });
-    expect(provider.config.models?.[0]?.id).toBe("gpt-5.3-codex");
+    expect(provider.config.models?.[0]?.id).toBe("gpt-5.4-mini");
   });
 
   it("rejects unknown provider types at runtime with known ids", async () => {
@@ -295,7 +295,7 @@ describe("resolvePaseoAgentModel", () => {
         PaseoAgentConfigSchema.parse({ providers: { chatgpt: { type: "chatgpt" } } }),
         null,
       ),
-    ).toEqual({ provider: "chatgpt", id: "gpt-5.3-codex" });
+    ).toEqual({ provider: "chatgpt", id: "gpt-5.4-mini" });
   });
 
   it("ignores an implicit default whose provider is not registered", () => {

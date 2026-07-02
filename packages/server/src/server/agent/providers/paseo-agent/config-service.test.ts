@@ -258,7 +258,7 @@ describe("PaseoAgentConfigService", () => {
       expect.objectContaining({
         name: "chatgpt",
         providerType: "chatgpt",
-        models: [{ id: "gpt-5.3-codex", reasoning: true }],
+        models: [{ id: "gpt-5.4-mini", reasoning: true }],
         auth: { kind: "oauth", configured: true, source: "stored" },
         available: true,
       }),
