@@ -1,60 +1,171 @@
 import { describe, expect, it } from "vitest";
+import type {
+  PaseoAgentCatalogEntry,
+  RedactedPaseoAgentProviderConfig,
+} from "@getpaseo/protocol/messages";
 
 import {
-  createOpenRouterProviderInput,
+  createPaseoAgentProviderInput,
+  getPaseoAgentApiKeyAuth,
+  getPaseoAgentOAuthAuth,
+  isPaseoAgentCatalogEntrySupported,
   parsePaseoAgentModelIds,
-  paseoAgentAuthLabel,
+  paseoAgentAuthBadge,
+  paseoAgentProviderLabel,
 } from "./paseo-agent-settings-sheet-model";
 
+function catalogEntry(overrides: Partial<PaseoAgentCatalogEntry>): PaseoAgentCatalogEntry {
+  return {
+    id: "catalog-alpha",
+    label: "Catalog Alpha",
+    api: "responses",
+    baseUrl: "https://alpha.example.test",
+    auth: { kind: "api_key", envVar: "ALPHA_API_KEY" },
+    models: [{ id: "alpha-fast", label: "Alpha Fast", reasoning: true }],
+    ...overrides,
+  };
+}
+
+function providerConfig(
+  overrides: Partial<RedactedPaseoAgentProviderConfig>,
+): RedactedPaseoAgentProviderConfig {
+  return {
+    name: "catalog-alpha",
+    providerType: "catalog-alpha",
+    models: [{ id: "alpha-fast" }],
+    available: true,
+    ...overrides,
+  };
+}
+
 describe("paseo-agent-settings-sheet-model", () => {
+  it("recognizes supported catalog auth manifests", () => {
+    const apiKeyEntry = catalogEntry({
+      auth: {
+        kind: "api_key",
+        envVar: "ALPHA_API_KEY",
+        keyUrl: "https://alpha.example.test/key",
+        placeholder: "alpha-key",
+        hint: "Paste the key from Alpha",
+      },
+    });
+    const oauthEntry = catalogEntry({
+      auth: { kind: "oauth", flow: "alpha-oauth" },
+    });
+
+    expect(getPaseoAgentApiKeyAuth(apiKeyEntry)).toEqual({
+      kind: "api_key",
+      envVar: "ALPHA_API_KEY",
+      keyUrl: "https://alpha.example.test/key",
+      placeholder: "alpha-key",
+      hint: "Paste the key from Alpha",
+    });
+    expect(getPaseoAgentOAuthAuth(oauthEntry)).toEqual({
+      kind: "oauth",
+      flow: "alpha-oauth",
+    });
+    expect(isPaseoAgentCatalogEntrySupported(apiKeyEntry)).toBe(true);
+    expect(isPaseoAgentCatalogEntrySupported(oauthEntry)).toBe(true);
+  });
+
+  it("keeps unknown catalog auth kinds visible but unsupported", () => {
+    const entry = catalogEntry({ auth: { kind: "future_auth", prompt: "later" } });
+
+    expect(getPaseoAgentApiKeyAuth(entry)).toBeNull();
+    expect(getPaseoAgentOAuthAuth(entry)).toBeNull();
+    expect(isPaseoAgentCatalogEntrySupported(entry)).toBe(false);
+  });
+
   it("parses model ids from comma and newline separated input", () => {
     expect(
       parsePaseoAgentModelIds(`
-        anthropic/claude-3.7-sonnet, openai/gpt-4o
-        anthropic/claude-3.7-sonnet
-        openai/gpt-4o-mini
+        alpha/fast, beta/steady
+        alpha/fast
+        gamma/deep
       `),
-    ).toEqual(["anthropic/claude-3.7-sonnet", "openai/gpt-4o", "openai/gpt-4o-mini"]);
+    ).toEqual(["alpha/fast", "beta/steady", "gamma/deep"]);
   });
 
-  it("builds the OpenRouter provider payload without an empty api key", () => {
+  it("builds a generic provider payload with a trimmed explicit key", () => {
     expect(
-      createOpenRouterProviderInput({
-        name: " openrouter-main ",
+      createPaseoAgentProviderInput({
+        entry: catalogEntry({ id: "catalog-beta" }),
+        name: " beta-main ",
+        apiKey: " beta-secret ",
+      }),
+    ).toEqual({
+      name: "beta-main",
+      providerType: "catalog-beta",
+      options: {
+        apiKey: "beta-secret",
+        models: [{ id: "alpha-fast", label: "Alpha Fast", reasoning: true }],
+      },
+    });
+  });
+
+  it("builds a generic provider payload with custom model ids", () => {
+    expect(
+      createPaseoAgentProviderInput({
+        entry: catalogEntry({ models: [] }),
+        name: "alpha-main",
+        apiKey: "alpha-secret",
+        modelIds: ["alpha/fast", "beta/steady"],
+      }),
+    ).toEqual({
+      name: "alpha-main",
+      providerType: "catalog-alpha",
+      options: {
+        apiKey: "alpha-secret",
+        models: [{ id: "alpha/fast" }, { id: "beta/steady" }],
+      },
+    });
+  });
+
+  it("builds a generic provider payload with an env reference for an empty key", () => {
+    expect(
+      createPaseoAgentProviderInput({
+        entry: catalogEntry({ auth: { kind: "api_key", envVar: "BETA_API_KEY" } }),
+        name: "beta-main",
         apiKey: "  ",
-        modelIds: ["openai/gpt-4o-mini"],
       }),
     ).toEqual({
-      name: "openrouter-main",
-      providerType: "openrouter",
+      name: "beta-main",
+      providerType: "catalog-alpha",
       options: {
-        models: [{ id: "openai/gpt-4o-mini" }],
+        apiKey: "$BETA_API_KEY",
+        models: [{ id: "alpha-fast", label: "Alpha Fast", reasoning: true }],
       },
     });
   });
 
-  it("builds the OpenRouter provider payload with a trimmed api key", () => {
+  it("builds an oauth provider payload without key material", () => {
     expect(
-      createOpenRouterProviderInput({
-        name: "openrouter-main",
-        apiKey: " sk-or-secret ",
-        modelIds: ["openai/gpt-4o-mini", "anthropic/claude-3.7-sonnet"],
+      createPaseoAgentProviderInput({
+        entry: catalogEntry({ auth: { kind: "oauth", flow: "alpha-oauth" } }),
+        name: "alpha-login",
       }),
     ).toEqual({
-      name: "openrouter-main",
-      providerType: "openrouter",
+      name: "alpha-login",
+      providerType: "catalog-alpha",
       options: {
-        apiKey: "sk-or-secret",
-        models: [{ id: "openai/gpt-4o-mini" }, { id: "anthropic/claude-3.7-sonnet" }],
+        models: [{ id: "alpha-fast", label: "Alpha Fast", reasoning: true }],
       },
     });
   });
 
-  it("describes the provider auth state", () => {
-    expect(paseoAgentAuthLabel({ kind: "api_key", configured: true })).toBe("API key configured");
-    expect(paseoAgentAuthLabel({ kind: "api_key", configured: false })).toBe("API key required");
-    expect(paseoAgentAuthLabel({ kind: "oauth", configured: true })).toBe("ChatGPT login stored");
-    expect(paseoAgentAuthLabel({ kind: "oauth", configured: false })).toBe("Login required");
-    expect(paseoAgentAuthLabel({ kind: "none", configured: false })).toBe("No auth");
+  it("uses catalog labels and generic auth badges for instance rows", () => {
+    expect(paseoAgentProviderLabel(providerConfig({}), catalogEntry({}))).toBe("Catalog Alpha");
+    expect(
+      paseoAgentProviderLabel(providerConfig({ providerType: "custom-alpha" }), undefined),
+    ).toBe("custom-alpha");
+    expect(paseoAgentAuthBadge({ kind: "api_key", configured: true })).toEqual({
+      label: "Connected",
+      variant: "success",
+    });
+    expect(paseoAgentAuthBadge({ kind: "oauth", configured: false })).toEqual({
+      label: "Needs attention",
+      variant: "error",
+    });
+    expect(paseoAgentAuthBadge(undefined)).toBeNull();
   });
 });

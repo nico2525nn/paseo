@@ -15,16 +15,22 @@ type PaseoAgentDaemonClient = Pick<
   | "storePaseoAgentOAuthCredential"
 >;
 
-interface OpenRouterProviderInput {
+interface ApiKeyProviderInput {
+  catalogId: string;
   name: string;
   apiKey: string;
-  models: string[];
+  models?: string[];
+}
+
+interface OAuthProviderInput {
+  catalogId: string;
+  name: string;
 }
 
 interface ExpectedProvider {
   name: string;
-  providerType: "openai-codex" | "openrouter";
-  auth: "API key configured" | "ChatGPT login stored";
+  providerLabel: string;
+  auth: "Connected" | "Needs attention";
   modelCount: number;
 }
 
@@ -42,20 +48,36 @@ export async function openPaseoAgentSettings(page: Page): Promise<void> {
   await expect(sheet.getByText("Paseo Agent", { exact: true })).toBeVisible();
 }
 
-export async function addOpenRouterProvider(
-  page: Page,
-  provider: OpenRouterProviderInput,
-): Promise<void> {
-  await page.getByRole("button", { name: "Add OpenRouter", exact: true }).click();
-  await expect(page.getByText("Add OpenRouter provider", { exact: true })).toBeVisible();
+export async function addApiKeyProvider(page: Page, provider: ApiKeyProviderInput): Promise<void> {
+  await page.getByRole("button", { name: "Add model provider", exact: true }).click();
+  await expect(page.getByTestId("paseo-agent-provider-picker")).toBeVisible();
+  await page.getByTestId(`paseo-agent-catalog-select-${provider.catalogId}`).click();
+  await expect(page.getByTestId("paseo-agent-provider-form")).toBeVisible();
 
   await page.getByLabel("Provider name").fill(provider.name);
-  await page.getByLabel("OpenRouter API key").fill(provider.apiKey);
-  await page.getByLabel("OpenRouter models").fill(provider.models.join("\n"));
+  await page.getByLabel("API key").fill(provider.apiKey);
+  if (provider.models) {
+    await page.getByLabel("Models").fill(provider.models.join("\n"));
+  }
   await page.getByRole("button", { name: "Save provider", exact: true }).click();
 
-  await expect(page.getByText("Add OpenRouter provider", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("paseo-agent-provider-form")).toHaveCount(0);
   await expect(page.getByText(provider.apiKey, { exact: true })).toHaveCount(0);
+}
+
+export async function startOAuthProviderSignIn(
+  page: Page,
+  provider: OAuthProviderInput,
+): Promise<void> {
+  await page.getByRole("button", { name: "Add model provider", exact: true }).click();
+  await expect(page.getByTestId("paseo-agent-provider-picker")).toBeVisible();
+  await page.getByTestId(`paseo-agent-catalog-select-${provider.catalogId}`).click();
+  await expect(page.getByTestId("paseo-agent-provider-form")).toBeVisible();
+
+  await page.getByLabel("Provider name").fill(provider.name);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByTestId("paseo-agent-oauth-user-code")).toBeVisible();
+  await expect(page.getByTestId("paseo-agent-oauth-verification-link")).toBeVisible();
 }
 
 export async function expectModelProviderListed(
@@ -66,7 +88,7 @@ export async function expectModelProviderListed(
   await expect(
     page.getByRole("listitem", {
       name: new RegExp(
-        `${expected.name}.*${expected.providerType}.*${modelLabel}.*${expected.auth}`,
+        `${expected.name}.*${expected.providerLabel}.*${modelLabel}.*${expected.auth}`,
       ),
     }),
   ).toBeVisible();
@@ -77,7 +99,7 @@ export async function seedChatGptProvider(providerName: string): Promise<void> {
   try {
     await client.setPaseoAgentProvider({
       name: providerName,
-      providerType: "openai-codex",
+      providerType: "chatgpt",
       options: {
         models: [{ id: "gpt-5.3-codex", reasoning: true }],
       },

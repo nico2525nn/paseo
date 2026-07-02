@@ -1,17 +1,71 @@
-import type { RedactedPaseoAgentProviderConfig } from "@getpaseo/protocol/messages";
+import type {
+  PaseoAgentCatalogEntry,
+  RedactedPaseoAgentProviderConfig,
+} from "@getpaseo/protocol/messages";
 import type { PaseoAgentSetProviderInput } from "@/hooks/use-paseo-agent-providers";
 
-export function paseoAgentAuthLabel(auth: RedactedPaseoAgentProviderConfig["auth"]): string {
-  if (!auth) {
-    return "Auth state unavailable";
+export interface PaseoAgentApiKeyAuthManifest {
+  kind: "api_key";
+  envVar: string;
+  keyUrl?: string;
+  placeholder?: string;
+  hint?: string;
+}
+
+export interface PaseoAgentOAuthAuthManifest {
+  kind: "oauth";
+  flow: string;
+}
+
+export interface PaseoAgentAuthBadge {
+  label: string;
+  variant: "success" | "error" | "muted";
+}
+
+export function getPaseoAgentApiKeyAuth(
+  entry: PaseoAgentCatalogEntry,
+): PaseoAgentApiKeyAuthManifest | null {
+  if (entry.auth.kind !== "api_key" || typeof entry.auth.envVar !== "string") {
+    return null;
   }
-  if (auth.kind === "oauth") {
-    return auth.configured ? "ChatGPT login stored" : "Login required";
+  return {
+    kind: "api_key",
+    envVar: entry.auth.envVar,
+    ...(typeof entry.auth.keyUrl === "string" ? { keyUrl: entry.auth.keyUrl } : {}),
+    ...(typeof entry.auth.placeholder === "string" ? { placeholder: entry.auth.placeholder } : {}),
+    ...(typeof entry.auth.hint === "string" ? { hint: entry.auth.hint } : {}),
+  };
+}
+
+export function getPaseoAgentOAuthAuth(
+  entry: PaseoAgentCatalogEntry,
+): PaseoAgentOAuthAuthManifest | null {
+  if (entry.auth.kind !== "oauth" || typeof entry.auth.flow !== "string") {
+    return null;
   }
-  if (auth.kind === "none") {
-    return "No auth";
+  return { kind: "oauth", flow: entry.auth.flow };
+}
+
+export function isPaseoAgentCatalogEntrySupported(entry: PaseoAgentCatalogEntry): boolean {
+  return getPaseoAgentApiKeyAuth(entry) !== null || getPaseoAgentOAuthAuth(entry) !== null;
+}
+
+export function paseoAgentProviderLabel(
+  provider: RedactedPaseoAgentProviderConfig,
+  catalogEntry: PaseoAgentCatalogEntry | undefined,
+): string {
+  return catalogEntry?.label ?? provider.providerType;
+}
+
+export function paseoAgentAuthBadge(
+  auth: RedactedPaseoAgentProviderConfig["auth"],
+): PaseoAgentAuthBadge | null {
+  if (!auth || auth.kind === "none") {
+    return null;
   }
-  return auth.configured ? "API key configured" : "API key required";
+  return auth.configured
+    ? { label: "Connected", variant: "success" }
+    : { label: "Needs attention", variant: "error" };
 }
 
 export function parsePaseoAgentModelIds(raw: string): string[] {
@@ -27,18 +81,29 @@ export function parsePaseoAgentModelIds(raw: string): string[] {
   return ids;
 }
 
-export function createOpenRouterProviderInput(input: {
+export function createPaseoAgentProviderInput(input: {
+  entry: PaseoAgentCatalogEntry;
   name: string;
-  apiKey: string;
-  modelIds: string[];
+  apiKey?: string;
+  modelIds?: string[];
 }): PaseoAgentSetProviderInput {
-  const trimmedKey = input.apiKey.trim();
+  const apiKeyAuth = getPaseoAgentApiKeyAuth(input.entry);
+  const trimmedKey = input.apiKey?.trim() ?? "";
+  let apiKey: string | undefined;
+  if (apiKeyAuth) {
+    apiKey = trimmedKey.length > 0 ? trimmedKey : `$${apiKeyAuth.envVar}`;
+  }
+  const models =
+    input.modelIds && input.modelIds.length > 0
+      ? input.modelIds.map((id) => ({ id }))
+      : input.entry.models.map((model) => ({ ...model }));
+
   return {
     name: input.name.trim(),
-    providerType: "openrouter",
+    providerType: input.entry.id,
     options: {
-      models: input.modelIds.map((id) => ({ id })),
-      ...(trimmedKey.length > 0 ? { apiKey: trimmedKey } : {}),
+      models,
+      ...(apiKey ? { apiKey } : {}),
     },
   };
 }

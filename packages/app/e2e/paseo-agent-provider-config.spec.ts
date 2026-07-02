@@ -1,10 +1,11 @@
 import { test } from "./fixtures";
 import {
-  addOpenRouterProvider,
+  addApiKeyProvider,
   cleanupPaseoAgentProviders,
   expectModelProviderListed,
   openPaseoAgentSettings,
   seedChatGptProvider,
+  startOAuthProviderSignIn,
 } from "./helpers/paseo-agent";
 
 const OPENROUTER_PROVIDER = "phase-e-openrouter-ui";
@@ -22,7 +23,8 @@ test.describe("Paseo Agent provider configuration", () => {
     providerNamesToCleanup.add(OPENROUTER_PROVIDER);
 
     await openPaseoAgentSettings(page);
-    await addOpenRouterProvider(page, {
+    await addApiKeyProvider(page, {
+      catalogId: "openrouter",
       name: OPENROUTER_PROVIDER,
       apiKey: "sk-or-phase-e-write-only",
       models: ["openai/gpt-4o-mini", "anthropic/claude-3.7-sonnet"],
@@ -30,9 +32,19 @@ test.describe("Paseo Agent provider configuration", () => {
 
     await expectModelProviderListed(page, {
       name: OPENROUTER_PROVIDER,
-      providerType: "openrouter",
+      providerLabel: "OpenRouter",
       modelCount: 2,
-      auth: "API key configured",
+      auth: "Connected",
+    });
+  });
+
+  test("starts a ChatGPT sign-in from Settings", async ({ page }) => {
+    providerNamesToCleanup.add(CHATGPT_PROVIDER);
+
+    await openPaseoAgentSettings(page);
+    await startOAuthProviderSignIn(page, {
+      catalogId: "chatgpt",
+      name: CHATGPT_PROVIDER,
     });
   });
 
@@ -44,9 +56,9 @@ test.describe("Paseo Agent provider configuration", () => {
 
     await expectModelProviderListed(page, {
       name: CHATGPT_PROVIDER,
-      providerType: "openai-codex",
+      providerLabel: "ChatGPT",
       modelCount: 1,
-      auth: "ChatGPT login stored",
+      auth: "Connected",
     });
   });
 });

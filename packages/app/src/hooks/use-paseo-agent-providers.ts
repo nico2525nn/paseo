@@ -2,6 +2,9 @@ import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import type {
+  PaseoAgentCatalogEntry,
+  PaseoAgentOAuthCompleteResponse,
+  PaseoAgentOAuthStartResponse,
   PaseoAgentSetProviderRequest,
   RedactedPaseoAgentProviderConfig,
 } from "@getpaseo/protocol/messages";
@@ -12,6 +15,10 @@ export function paseoAgentProvidersQueryKey(serverId: string | null) {
   return ["paseo-agent-providers", serverId] as const;
 }
 
+export function paseoAgentCatalogQueryKey(serverId: string | null) {
+  return ["paseo-agent-catalog", serverId] as const;
+}
+
 function describeQueryError(error: unknown): string | null {
   if (!error) {
     return null;
@@ -20,17 +27,25 @@ function describeQueryError(error: unknown): string | null {
 }
 
 export type PaseoAgentSetProviderInput = Omit<PaseoAgentSetProviderRequest, "type" | "requestId">;
+export type PaseoAgentOAuthStartResult = PaseoAgentOAuthStartResponse["payload"];
+export type PaseoAgentOAuthCompleteResult = PaseoAgentOAuthCompleteResponse["payload"];
 
 interface UsePaseoAgentProvidersResult {
   supported: boolean;
+  catalogSupported: boolean;
   providers: RedactedPaseoAgentProviderConfig[];
+  catalog: PaseoAgentCatalogEntry[];
   defaultModel: string | null;
   isLoading: boolean;
+  isCatalogLoading: boolean;
   error: string | null;
+  catalogError: string | null;
   refresh: () => Promise<void>;
   setProvider: (
     input: PaseoAgentSetProviderInput,
   ) => Promise<RedactedPaseoAgentProviderConfig | null>;
+  startOAuth: (name: string) => Promise<PaseoAgentOAuthStartResult>;
+  completeOAuth: (name: string) => Promise<PaseoAgentOAuthCompleteResult>;
 }
 
 export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentProvidersResult {
@@ -44,7 +59,12 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
   const supported = useSessionStore(
     (state) => state.sessions[serverId ?? ""]?.serverInfo?.features?.paseoAgentConfig === true,
   );
+  // COMPAT(paseoAgentCatalog): added in v0.1.104, drop the gate when floor >= v0.1.104.
+  const catalogSupported = useSessionStore(
+    (state) => state.sessions[serverId ?? ""]?.serverInfo?.features?.paseoAgentCatalog === true,
+  );
   const queryKey = useMemo(() => paseoAgentProvidersQueryKey(serverId), [serverId]);
+  const catalogQueryKey = useMemo(() => paseoAgentCatalogQueryKey(serverId), [serverId]);
 
   const query = useQuery({
     queryKey,
@@ -58,11 +78,25 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
     },
   });
 
+  const catalogQuery = useQuery({
+    queryKey: catalogQueryKey,
+    enabled: Boolean(supported && catalogSupported && serverId && client && isConnected),
+    staleTime: 30_000,
+    queryFn: async () => {
+      if (!client) {
+        throw new Error(hostDisconnectedMessage);
+      }
+      return client.getPaseoAgentCatalog();
+    },
+  });
+
   const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey });
-  }, [queryClient, queryKey]);
+    await queryClient.invalidateQueries({ queryKey: catalogQueryKey });
+  }, [catalogQueryKey, queryClient, queryKey]);
 
   const error = query.data?.error ?? describeQueryError(query.error);
+  const catalogError = catalogQuery.data?.error ?? describeQueryError(catalogQuery.error);
 
   const setProviderMutation = useMutation({
     mutationFn: async (input: PaseoAgentSetProviderInput) => {
@@ -86,13 +120,57 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
     [setProviderAsync],
   );
 
+  const startOAuthMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!client) {
+        throw new Error(hostDisconnectedMessage);
+      }
+      const result = await client.startPaseoAgentOAuth(name);
+      if (!result.success) {
+        throw new Error(result.error ?? saveProviderFailedMessage);
+      }
+      return result;
+    },
+  });
+  const { mutateAsync: startOAuthAsync } = startOAuthMutation;
+
+  const startOAuth = useCallback((name: string) => startOAuthAsync(name), [startOAuthAsync]);
+
+  const completeOAuthMutation = useMutation({
+    mutationFn: async (name: string) => {
+      if (!client) {
+        throw new Error(hostDisconnectedMessage);
+      }
+      const result = await client.completePaseoAgentOAuth(name);
+      if (!result.success) {
+        throw new Error(result.error ?? saveProviderFailedMessage);
+      }
+      return result;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey });
+    },
+  });
+  const { mutateAsync: completeOAuthAsync } = completeOAuthMutation;
+
+  const completeOAuth = useCallback(
+    (name: string) => completeOAuthAsync(name),
+    [completeOAuthAsync],
+  );
+
   return {
     supported,
+    catalogSupported,
     providers: query.data?.providers ?? [],
+    catalog: catalogQuery.data?.catalog ?? [],
     defaultModel: query.data?.defaultModel ?? null,
     isLoading: query.isLoading,
+    isCatalogLoading: catalogQuery.isLoading,
     error,
+    catalogError,
     refresh,
     setProvider,
+    startOAuth,
+    completeOAuth,
   };
 }
