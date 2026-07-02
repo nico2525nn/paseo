@@ -17,14 +17,11 @@ type PaseoAgentDaemonClient = Pick<
 
 interface ApiKeyProviderInput {
   catalogId: string;
-  name: string;
   apiKey: string;
-  models?: string[];
 }
 
 interface OAuthProviderInput {
   catalogId: string;
-  name: string;
 }
 
 interface ExpectedProvider {
@@ -54,11 +51,9 @@ export async function addApiKeyProvider(page: Page, provider: ApiKeyProviderInpu
   await page.getByTestId(`paseo-agent-catalog-select-${provider.catalogId}`).click();
   await expect(page.getByTestId("paseo-agent-provider-form")).toBeVisible();
 
-  await page.getByLabel("Provider name").fill(provider.name);
+  await expect(page.getByLabel("Provider name")).toHaveCount(0);
+  await expect(page.getByLabel("Models")).toHaveCount(0);
   await page.getByLabel("API key").fill(provider.apiKey);
-  if (provider.models) {
-    await page.getByLabel("Models").fill(provider.models.join("\n"));
-  }
   await page.getByRole("button", { name: "Save provider", exact: true }).click();
 
   await expect(page.getByTestId("paseo-agent-provider-form")).toHaveCount(0);
@@ -72,9 +67,13 @@ export async function startOAuthProviderSignIn(
   await page.getByRole("button", { name: "Add model provider", exact: true }).click();
   await expect(page.getByTestId("paseo-agent-provider-picker")).toBeVisible();
   await page.getByTestId(`paseo-agent-catalog-select-${provider.catalogId}`).click();
-  await expect(page.getByTestId("paseo-agent-provider-form")).toBeVisible();
 
-  await page.getByLabel("Provider name").fill(provider.name);
+  await expect(page.getByTestId("paseo-agent-provider-form")).toHaveCount(0);
+  await expect(page.getByTestId("paseo-agent-oauth-sign-in")).toBeVisible();
+  await expect(page.getByLabel("Provider name")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Sign in with browser", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Use a code instead", exact: true }).click();
   await expect(page.getByTestId("paseo-agent-oauth-user-code")).toBeVisible();
   await expect(page.getByTestId("paseo-agent-oauth-verification-link")).toBeVisible();

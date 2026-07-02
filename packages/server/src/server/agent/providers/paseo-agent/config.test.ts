@@ -154,6 +154,21 @@ describe("resolvePaseoAgentCatalogAuth", () => {
       restoreEnvVars(previousValues);
     }
   });
+
+  it("assigns icon names to every Paseo Agent catalog entry", () => {
+    const iconNames = new Map(
+      PASEO_AGENT_PROVIDER_CATALOG.map((entry) => [entry.id, entry.iconName]),
+    );
+
+    expect(iconNames).toEqual(
+      new Map([
+        ["openrouter", "openrouter"],
+        ["chatgpt", "openai"],
+        ["kimi", "kimi"],
+        ["opencode-go", "opencode"],
+      ]),
+    );
+  });
 });
 
 describe("listPaseoAgentModels", () => {

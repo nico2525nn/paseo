@@ -321,6 +321,41 @@ describe("PaseoAgentConfigService", () => {
     expect(JSON.stringify(providers)).not.toContain("refresh-token");
   });
 
+  test("renames the provider display name without moving stored OAuth credentials", () => {
+    const service = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+    });
+    service.setProvider({
+      name: "subscription",
+      providerType: "chatgpt",
+      options: {},
+    });
+    service.storeOAuthCredential("subscription", {
+      type: "oauth",
+      access: "access-token",
+      refresh: "refresh-token",
+      expires: 123,
+    });
+
+    const provider = service.renameProvider("subscription", "Work account");
+
+    expect(provider).toMatchObject({
+      name: "subscription",
+      displayName: "Work account",
+      auth: { kind: "oauth", configured: true, source: "stored" },
+      available: true,
+    });
+    const stored = JSON.parse(
+      readFileSync(paseoAgentAuthStoragePath({ PASEO_HOME: home }), "utf8"),
+    );
+    expect(Object.keys(stored)).toEqual(["subscription"]);
+    expect(stored.subscription).toMatchObject({
+      type: "oauth",
+      refresh: "refresh-token",
+    });
+  });
+
   test("reports OAuth as missing or needing attention for absent and mismatched credentials", () => {
     const service = new PaseoAgentConfigService({
       paseoHome: home,

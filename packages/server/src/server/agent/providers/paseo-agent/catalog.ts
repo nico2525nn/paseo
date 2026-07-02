@@ -30,6 +30,7 @@ export const PASEO_AGENT_PROVIDER_CATALOG = [
     id: "openrouter",
     piProvider: "openrouter",
     label: "OpenRouter",
+    iconName: "openrouter",
     auth: { kind: "api_key", envVar: "OPENROUTER_API_KEY" },
     defaultModels: false,
   },
@@ -43,12 +44,14 @@ export const PASEO_AGENT_PROVIDER_CATALOG = [
     id: "kimi",
     piProvider: "kimi-coding",
     label: "Kimi Coding Plan",
+    iconName: "kimi",
     auth: { kind: "api_key", envVar: "KIMI_API_KEY" },
   },
   {
     id: "opencode-go",
     piProvider: "opencode-go",
     label: "OpenCode Go",
+    iconName: "opencode",
     auth: { kind: "api_key", envVar: "OPENCODE_API_KEY" },
   },
 ] as const satisfies readonly PaseoAgentCatalogRef[];

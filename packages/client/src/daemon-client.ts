@@ -103,6 +103,8 @@ import type {
   PaseoAgentOAuthCredential,
   PaseoAgentOAuthStartResponse,
   PaseoAgentOAuthStoreCredentialResponse,
+  PaseoAgentRenameProviderRequest,
+  PaseoAgentRenameProviderResponse,
   PaseoAgentRemoveProviderResponse,
   PaseoAgentSetProviderRequest,
   PaseoAgentSetProviderResponse,
@@ -3905,6 +3907,7 @@ export class DaemonClient {
         type: "config.paseo_agent.set_provider.request",
         name: input.name,
         providerType: input.providerType,
+        ...(input.displayName ? { displayName: input.displayName } : {}),
         options: input.options,
       },
       timeout: 30000,
@@ -3920,6 +3923,20 @@ export class DaemonClient {
       message: {
         type: "config.paseo_agent.remove_provider.request",
         name,
+      },
+      timeout: 30000,
+    });
+  }
+
+  async renamePaseoAgentProvider(
+    input: Omit<PaseoAgentRenameProviderRequest, "type" | "requestId"> & { requestId?: string },
+  ): Promise<PaseoAgentRenameProviderResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId: input.requestId,
+      message: {
+        type: "config.paseo_agent.rename_provider.request",
+        name: input.name,
+        displayName: input.displayName,
       },
       timeout: 30000,
     });

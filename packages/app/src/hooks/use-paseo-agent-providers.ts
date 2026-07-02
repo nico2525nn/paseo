@@ -5,6 +5,7 @@ import type {
   PaseoAgentCatalogEntry,
   PaseoAgentOAuthCompleteResponse,
   PaseoAgentOAuthStartResponse,
+  PaseoAgentRenameProviderRequest,
   PaseoAgentSetProviderRequest,
   RedactedPaseoAgentProviderConfig,
 } from "@getpaseo/protocol/messages";
@@ -27,6 +28,10 @@ function describeQueryError(error: unknown): string | null {
 }
 
 export type PaseoAgentSetProviderInput = Omit<PaseoAgentSetProviderRequest, "type" | "requestId">;
+export type PaseoAgentRenameProviderInput = Omit<
+  PaseoAgentRenameProviderRequest,
+  "type" | "requestId"
+>;
 export type PaseoAgentOAuthStartResult = PaseoAgentOAuthStartResponse["payload"];
 export type PaseoAgentOAuthCompleteResult = PaseoAgentOAuthCompleteResponse["payload"];
 
@@ -43,6 +48,9 @@ interface UsePaseoAgentProvidersResult {
   refresh: () => Promise<void>;
   setProvider: (
     input: PaseoAgentSetProviderInput,
+  ) => Promise<RedactedPaseoAgentProviderConfig | null>;
+  renameProvider: (
+    input: PaseoAgentRenameProviderInput,
   ) => Promise<RedactedPaseoAgentProviderConfig | null>;
   startOAuth: (name: string, mode?: string) => Promise<PaseoAgentOAuthStartResult>;
   completeOAuth: (name: string) => Promise<PaseoAgentOAuthCompleteResult>;
@@ -120,6 +128,28 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
     [setProviderAsync],
   );
 
+  const renameProviderMutation = useMutation({
+    mutationFn: async (input: PaseoAgentRenameProviderInput) => {
+      if (!client) {
+        throw new Error(hostDisconnectedMessage);
+      }
+      const result = await client.renamePaseoAgentProvider(input);
+      if (!result.success) {
+        throw new Error(result.error ?? saveProviderFailedMessage);
+      }
+      return result.provider;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey });
+    },
+  });
+  const { mutateAsync: renameProviderAsync } = renameProviderMutation;
+
+  const renameProvider = useCallback(
+    (input: PaseoAgentRenameProviderInput) => renameProviderAsync(input),
+    [renameProviderAsync],
+  );
+
   const startOAuthMutation = useMutation({
     mutationFn: async (input: { name: string; mode?: string }) => {
       if (!client) {
@@ -173,6 +203,7 @@ export function usePaseoAgentProviders(serverId: string | null): UsePaseoAgentPr
     catalogError,
     refresh,
     setProvider,
+    renameProvider,
     startOAuth,
     completeOAuth,
   };

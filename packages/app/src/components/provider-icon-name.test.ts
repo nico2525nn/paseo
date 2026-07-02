@@ -16,6 +16,16 @@ describe("resolveProviderIconName", () => {
     expect(resolveProviderIconName("paseo")).toEqual({ kind: "builtin", id: "paseo" });
   });
 
+  it("resolves Paseo Agent model-provider catalog icon names", () => {
+    expect(resolveProviderIconName("openai")).toEqual({ kind: "builtin", id: "openai" });
+    expect(resolveProviderIconName("openrouter")).toEqual({
+      kind: "builtin",
+      id: "openrouter",
+    });
+    expect(resolveProviderIconName("kimi")).toEqual({ kind: "catalog", id: "kimi" });
+    expect(resolveProviderIconName("opencode")).toEqual({ kind: "builtin", id: "opencode" });
+  });
+
   it("returns the catalog identifier for ACP catalog provider ids that ship an icon", () => {
     expect(resolveProviderIconName("amp-acp")).toEqual({ kind: "catalog", id: "amp-acp" });
     expect(resolveProviderIconName("gemini")).toEqual({ kind: "catalog", id: "gemini" });

@@ -45,6 +45,7 @@ const PaseoAgentProviderOptionsSchema = z
 const PaseoAgentModelProviderSchema = z
   .object({
     type: z.string().min(1),
+    displayName: z.string().min(1).optional(),
     options: PaseoAgentProviderOptionsSchema.default({}),
   })
   .strict();

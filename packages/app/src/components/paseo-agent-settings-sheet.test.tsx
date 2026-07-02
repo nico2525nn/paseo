@@ -400,24 +400,19 @@ describe("PaseoAgentSettingsSheet", () => {
     renderSheet();
     fireEvent.click(screen.getByRole("button", { name: "Add model provider" }));
     fireEvent.click(screen.getByTestId("paseo-agent-catalog-select-catalog-alpha"));
-    fireEvent.change(screen.getByLabelText("Provider name"), {
-      target: { value: "alpha-main" },
-    });
+    expect(screen.queryByLabelText("Provider name")).toBeNull();
+    expect(screen.queryByLabelText("Models")).toBeNull();
     fireEvent.change(screen.getByLabelText("API key"), {
       target: { value: " alpha-secret " },
-    });
-    fireEvent.change(screen.getByLabelText("Models"), {
-      target: { value: "alpha/fast\nbeta/steady" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save provider" }));
 
     await waitFor(() => {
       expect(hookState.current.setProvider).toHaveBeenCalledWith({
-        name: "alpha-main",
+        name: "Catalog Alpha",
         providerType: "catalog-alpha",
         options: {
           apiKey: "alpha-secret",
-          models: [{ id: "alpha/fast" }, { id: "beta/steady" }],
         },
       } satisfies PaseoAgentSetProviderInput);
     });
@@ -433,7 +428,7 @@ describe("PaseoAgentSettingsSheet", () => {
 
     await waitFor(() => {
       expect(hookState.current.setProvider).toHaveBeenCalledWith({
-        name: "catalog-alpha",
+        name: "Catalog Alpha",
         providerType: "catalog-alpha",
         options: {
           apiKey: "$ALPHA_API_KEY",
@@ -470,7 +465,7 @@ describe("PaseoAgentSettingsSheet", () => {
 
     await waitFor(() => {
       expect(openExternalUrls).toEqual(["https://login.example.test/oauth/authorize?state=abc"]);
-      expect(hookState.current.startOAuth).toHaveBeenCalledWith("catalog-login", "browser");
+      expect(hookState.current.startOAuth).toHaveBeenCalledWith("Catalog Login", "browser");
     });
     expect(screen.getByText("https://login.example.test/oauth/authorize?state=abc")).toBeTruthy();
     expect(screen.getByTestId("paseo-agent-oauth-url").getAttribute("href")).toBe(
@@ -512,14 +507,14 @@ describe("PaseoAgentSettingsSheet", () => {
 
     await waitFor(() => {
       expect(hookState.current.setProvider).toHaveBeenCalledWith({
-        name: "catalog-login",
+        name: "Catalog Login",
         providerType: "catalog-login",
         options: {
           models: [{ id: "alpha-fast", label: "Alpha Fast" }],
         },
       } satisfies PaseoAgentSetProviderInput);
-      expect(hookState.current.startOAuth).toHaveBeenCalledWith("catalog-login", "device_code");
-      expect(hookState.current.completeOAuth).toHaveBeenCalledWith("catalog-login");
+      expect(hookState.current.startOAuth).toHaveBeenCalledWith("Catalog Login", "device_code");
+      expect(hookState.current.completeOAuth).toHaveBeenCalledWith("Catalog Login");
     });
   });
 
@@ -540,7 +535,7 @@ describe("PaseoAgentSettingsSheet", () => {
     fireEvent.click(screen.getByTestId("paseo-agent-catalog-select-catalog-login"));
 
     const actionButtons = screen
-      .getByTestId("paseo-agent-provider-form")
+      .getByTestId("paseo-agent-oauth-sign-in")
       .querySelectorAll("button");
     expect(Array.from(actionButtons).map((button) => button.textContent)).toEqual([
       "Providers",

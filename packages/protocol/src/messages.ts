@@ -2004,6 +2004,7 @@ export const PaseoAgentProviderAuthStateSchema = z
 export const RedactedPaseoAgentProviderConfigSchema = z
   .object({
     name: z.string().min(1),
+    displayName: z.string().min(1).optional(),
     providerType: PaseoAgentProviderTypeSchema,
     baseUrl: z.string().optional(),
     api: z.string().optional(),
@@ -2028,6 +2029,7 @@ export const PaseoAgentSetProviderRequestSchema = z.object({
   type: z.literal("config.paseo_agent.set_provider.request"),
   requestId: z.string(),
   name: z.string().trim().min(1),
+  displayName: z.string().trim().min(1).optional(),
   providerType: PaseoAgentProviderTypeSchema,
   options: PaseoAgentSetProviderOptionsSchema,
 });
@@ -2036,6 +2038,13 @@ export const PaseoAgentRemoveProviderRequestSchema = z.object({
   type: z.literal("config.paseo_agent.remove_provider.request"),
   requestId: z.string(),
   name: z.string().trim().min(1),
+});
+
+export const PaseoAgentRenameProviderRequestSchema = z.object({
+  type: z.literal("config.paseo_agent.rename_provider.request"),
+  requestId: z.string(),
+  name: z.string().trim().min(1),
+  displayName: z.string().trim().min(1),
 });
 
 export const PaseoAgentOAuthStartRequestSchema = z.object({
@@ -2213,6 +2222,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   PaseoAgentGetCatalogRequestSchema,
   PaseoAgentSetProviderRequestSchema,
   PaseoAgentRemoveProviderRequestSchema,
+  PaseoAgentRenameProviderRequestSchema,
   PaseoAgentOAuthStartRequestSchema,
   PaseoAgentOAuthCompleteRequestSchema,
   PaseoAgentOAuthStoreCredentialRequestSchema,
@@ -4056,6 +4066,16 @@ export const PaseoAgentRemoveProviderResponseSchema = z.object({
   }),
 });
 
+export const PaseoAgentRenameProviderResponseSchema = z.object({
+  type: z.literal("config.paseo_agent.rename_provider.response"),
+  payload: z.object({
+    requestId: z.string(),
+    success: z.boolean(),
+    provider: RedactedPaseoAgentProviderConfigSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 const PaseoAgentOAuthStartAuthorizationSchema = z
   .object({
     kind: z.string().min(1),
@@ -4500,6 +4520,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   PaseoAgentGetCatalogResponseSchema,
   PaseoAgentSetProviderResponseSchema,
   PaseoAgentRemoveProviderResponseSchema,
+  PaseoAgentRenameProviderResponseSchema,
   PaseoAgentOAuthStartResponseSchema,
   PaseoAgentOAuthCompleteResponseSchema,
   PaseoAgentOAuthStoreCredentialResponseSchema,
@@ -4647,6 +4668,9 @@ export type PaseoAgentSetProviderResponse = z.infer<typeof PaseoAgentSetProvider
 export type PaseoAgentRemoveProviderResponse = z.infer<
   typeof PaseoAgentRemoveProviderResponseSchema
 >;
+export type PaseoAgentRenameProviderResponse = z.infer<
+  typeof PaseoAgentRenameProviderResponseSchema
+>;
 export type PaseoAgentOAuthStartResponse = z.infer<typeof PaseoAgentOAuthStartResponseSchema>;
 export type PaseoAgentOAuthCompleteResponse = z.infer<typeof PaseoAgentOAuthCompleteResponseSchema>;
 export type PaseoAgentOAuthStoreCredentialResponse = z.infer<
@@ -4732,6 +4756,7 @@ export type PaseoAgentGetProvidersRequest = z.infer<typeof PaseoAgentGetProvider
 export type PaseoAgentGetCatalogRequest = z.infer<typeof PaseoAgentGetCatalogRequestSchema>;
 export type PaseoAgentSetProviderRequest = z.infer<typeof PaseoAgentSetProviderRequestSchema>;
 export type PaseoAgentRemoveProviderRequest = z.infer<typeof PaseoAgentRemoveProviderRequestSchema>;
+export type PaseoAgentRenameProviderRequest = z.infer<typeof PaseoAgentRenameProviderRequestSchema>;
 export type PaseoAgentOAuthStartRequest = z.infer<typeof PaseoAgentOAuthStartRequestSchema>;
 export type PaseoAgentOAuthCompleteRequest = z.infer<typeof PaseoAgentOAuthCompleteRequestSchema>;
 export type PaseoAgentOAuthStoreCredentialRequest = z.infer<

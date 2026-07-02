@@ -228,6 +228,35 @@ describe("Paseo Agent config RPC schemas", () => {
     expect(JSON.stringify(parsed)).not.toContain("refresh-token");
   });
 
+  test("parses provider rename request and response with display name", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "config.paseo_agent.rename_provider.request",
+      requestId: "req-rename-provider",
+      name: "subscription",
+      displayName: "Work account",
+    });
+    const response = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.rename_provider.response",
+      payload: {
+        requestId: "req-rename-provider",
+        success: true,
+        provider: {
+          name: "subscription",
+          displayName: "Work account",
+          providerType: "chatgpt",
+          models: [{ id: "gpt-5.4-mini" }],
+          auth: { kind: "oauth", configured: true, source: "stored" },
+          available: true,
+          error: null,
+        },
+        error: null,
+      },
+    });
+
+    expect(request.displayName).toBe("Work account");
+    expect(response.payload.provider?.displayName).toBe("Work account");
+  });
+
   test("parses ChatGPT provider config separately from credential storage", () => {
     const parsed = SessionInboundMessageSchema.parse({
       type: "config.paseo_agent.set_provider.request",

@@ -20,7 +20,7 @@ export function ProviderSettingsHost() {
   }
 
   if (provider === PASEO_AGENT_PROVIDER) {
-    return <PaseoAgentSettingsSheet serverId={serverId} visible onClose={handleClose} />;
+    return <PaseoAgentSettingsSheet serverId={serverId} visible={visible} onClose={handleClose} />;
   }
 
   return (

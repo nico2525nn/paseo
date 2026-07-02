@@ -21,6 +21,7 @@ import { useHostRuntimeSnapshot } from "@/runtime/host-runtime";
 import type {
   PaseoAgentOAuthCompleteResult,
   PaseoAgentOAuthStartResult,
+  PaseoAgentRenameProviderInput,
   PaseoAgentSetProviderInput,
 } from "@/hooks/use-paseo-agent-providers";
 import type { Theme } from "@/styles/theme";
@@ -32,7 +33,7 @@ import {
   getPaseoAgentApiKeyAuth,
   getPaseoAgentOAuthAuth,
   isPaseoAgentCatalogEntrySupported,
-  parsePaseoAgentModelIds,
+  nextPaseoAgentProviderName,
   paseoAgentAuthBadge,
   paseoAgentProviderLabel,
   preferredPaseoAgentOAuthMode,
@@ -56,9 +57,12 @@ type AddSheetState =
   | {
       kind: "form";
       entry: PaseoAgentCatalogEntry;
-      initialName?: string;
-      lockName: boolean;
+      name: string;
       returnToPicker: boolean;
+    }
+  | {
+      kind: "rename";
+      provider: RedactedPaseoAgentProviderConfig;
     };
 
 type OAuthState =
@@ -79,17 +83,6 @@ type OAuthState =
       message: string;
       authorization: PaseoAgentOAuthStartResult["authorization"];
     };
-
-interface ProviderNameAndModelsFieldsProps {
-  entry: PaseoAgentCatalogEntry;
-  name: string;
-  models: string;
-  resetKey: number;
-  lockName: boolean;
-  hasCatalogModels: boolean;
-  onNameChange: (value: string) => void;
-  onModelsChange: (value: string) => void;
-}
 
 interface ApiKeyFieldsProps {
   auth: PaseoAgentApiKeyAuthManifest;
@@ -146,8 +139,14 @@ function modelCountLabel(count: number): string {
   return count === 1 ? "1 model" : `${count} models`;
 }
 
-function catalogModelSummary(entry: PaseoAgentCatalogEntry): string {
-  return entry.models.length > 0 ? modelCountLabel(entry.models.length) : "Custom models";
+function catalogAuthSummary(entry: PaseoAgentCatalogEntry): string | null {
+  if (getPaseoAgentOAuthAuth(entry)) {
+    return "Sign in";
+  }
+  if (getPaseoAgentApiKeyAuth(entry)) {
+    return "API key";
+  }
+  return null;
 }
 
 function hasKnownProviderIcon(iconName: string | undefined): iconName is string {
@@ -205,19 +204,22 @@ function ProviderRow({
   catalogEntry,
   isFirst,
   onReauth,
+  onRename,
 }: {
   provider: RedactedPaseoAgentProviderConfig;
   catalogEntry: PaseoAgentCatalogEntry | undefined;
   isFirst: boolean;
   onReauth: (provider: RedactedPaseoAgentProviderConfig, entry: PaseoAgentCatalogEntry) => void;
+  onRename: (provider: RedactedPaseoAgentProviderConfig) => void;
 }) {
   const modelLabel = modelCountLabel(provider.models.length);
   const authBadge = paseoAgentAuthBadge(provider.auth);
   const providerLabel = paseoAgentProviderLabel(provider, catalogEntry);
+  const providerName = provider.displayName ?? provider.name;
   const canReauth = Boolean(catalogEntry && isPaseoAgentCatalogEntrySupported(catalogEntry));
   const accessibilityLabel = authBadge
-    ? `${provider.name}, ${providerLabel}, ${modelLabel}, ${authBadge.label}`
-    : `${provider.name}, ${providerLabel}, ${modelLabel}`;
+    ? `${providerName}, ${providerLabel}, ${modelLabel}, ${authBadge.label}`
+    : `${providerName}, ${providerLabel}, ${modelLabel}`;
   const rowStyle = useMemo(() => [styles.providerRow, !isFirst && styles.rowBorder], [isFirst]);
 
   const handleReauth = useCallback(() => {
@@ -225,6 +227,9 @@ function ProviderRow({
       onReauth(provider, catalogEntry);
     }
   }, [catalogEntry, onReauth, provider]);
+  const handleRename = useCallback(() => {
+    onRename(provider);
+  }, [onRename, provider]);
 
   return (
     <View
@@ -237,13 +242,21 @@ function ProviderRow({
       <View style={provider.available ? styles.dotAvailable : styles.dotMuted} />
       <View style={styles.providerText}>
         <Text style={styles.providerName} numberOfLines={1}>
-          {provider.name}
+          {providerName}
         </Text>
         <Text style={styles.providerMeta} numberOfLines={1}>
           {providerLabel} · {modelLabel}
         </Text>
       </View>
       {authBadge ? <StatusBadge label={authBadge.label} variant={authBadge.variant} /> : null}
+      <Button
+        variant="outline"
+        size="xs"
+        onPress={handleRename}
+        testID={`paseo-agent-provider-rename-${provider.name}`}
+      >
+        Rename
+      </Button>
       {canReauth ? (
         <Button
           variant="outline"
@@ -268,6 +281,7 @@ function CatalogEntryRow({
   onSelect: (entry: PaseoAgentCatalogEntry) => void;
 }) {
   const supported = isPaseoAgentCatalogEntrySupported(entry);
+  const authSummary = catalogAuthSummary(entry);
   const rowStyle = useMemo(
     () => [styles.catalogRow, !isFirst && styles.rowBorder, !supported && styles.disabledRow],
     [isFirst, supported],
@@ -282,16 +296,18 @@ function CatalogEntryRow({
       accessibilityLabel={entry.label}
       testID={`paseo-agent-catalog-entry-${entry.id}`}
     >
-      <View style={styles.catalogIcon}>
+      <View style={styles.catalogIcon} testID={`paseo-agent-catalog-icon-${entry.id}`}>
         <CatalogEntryIcon entry={entry} />
       </View>
       <View style={styles.catalogText}>
         <Text style={styles.providerName} numberOfLines={1}>
           {entry.label}
         </Text>
-        <Text style={styles.providerMeta} numberOfLines={1}>
-          {entry.api} · {catalogModelSummary(entry)}
-        </Text>
+        {authSummary ? (
+          <Text style={styles.providerMeta} numberOfLines={1}>
+            {authSummary}
+          </Text>
+        ) : null}
         {entry.docsUrl ? (
           <ExternalLink
             href={entry.docsUrl}
@@ -435,59 +451,6 @@ function OAuthAuthorizationPanel({
       {instructions ? <Text style={styles.formHint}>{instructions}</Text> : null}
       {!url && !instructions ? <Text style={styles.formHint}>Update the app</Text> : null}
     </View>
-  );
-}
-
-function ProviderNameAndModelsFields({
-  entry,
-  name,
-  models,
-  resetKey,
-  lockName,
-  hasCatalogModels,
-  onNameChange,
-  onModelsChange,
-}: ProviderNameAndModelsFieldsProps) {
-  const modelInputStyle = useMemo(() => [styles.formInput, styles.modelsInput], []);
-
-  return (
-    <>
-      <Text style={styles.formLabel}>Provider name</Text>
-      <AdaptiveTextInput
-        testID="paseo-agent-provider-name"
-        accessibilityLabel="Provider name"
-        initialValue={name}
-        resetKey={`paseo-agent-provider-name-${resetKey}`}
-        value={name}
-        onChangeText={onNameChange}
-        placeholder={entry.id}
-        editable={!lockName}
-        autoCapitalize="none"
-        autoCorrect={false}
-        style={styles.formInput}
-      />
-      {hasCatalogModels ? (
-        <Text style={styles.formHint}>{modelCountLabel(entry.models.length)} from the catalog</Text>
-      ) : (
-        <>
-          <Text style={styles.formLabel}>Models</Text>
-          <AdaptiveTextInput
-            testID="paseo-agent-models"
-            accessibilityLabel="Models"
-            initialValue={models}
-            resetKey={`paseo-agent-models-${resetKey}`}
-            value={models}
-            onChangeText={onModelsChange}
-            placeholder="provider/model-id"
-            multiline
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={modelInputStyle}
-          />
-          <Text style={styles.formHint}>One model id per line, or comma-separated.</Text>
-        </>
-      )}
-    </>
   );
 }
 
@@ -638,8 +601,7 @@ function ProviderFormActions({
 function PaseoAgentProviderFormSheet({
   entry,
   visible,
-  initialName,
-  lockName,
+  name,
   onBack,
   onClose,
   setProvider,
@@ -649,8 +611,7 @@ function PaseoAgentProviderFormSheet({
 }: {
   entry: PaseoAgentCatalogEntry | null;
   visible: boolean;
-  initialName: string | undefined;
-  lockName: boolean;
+  name: string | undefined;
   onBack: () => void;
   onClose: () => void;
   setProvider: (
@@ -660,9 +621,7 @@ function PaseoAgentProviderFormSheet({
   completeOAuth: (name: string) => Promise<PaseoAgentOAuthCompleteResult>;
   preferredOAuthMode: PaseoAgentOAuthMode;
 }) {
-  const [name, setName] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [models, setModels] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [oauthState, setOAuthState] = useState<OAuthState>({ status: "idle" });
@@ -670,15 +629,13 @@ function PaseoAgentProviderFormSheet({
 
   useEffect(() => {
     if (visible && entry) {
-      setName(initialName ?? entry.id);
       setApiKey("");
-      setModels("");
       setError(null);
       setSaving(false);
       setOAuthState({ status: "idle" });
       bumpResetKey();
     }
-  }, [entry, initialName, visible]);
+  }, [entry, name, visible]);
 
   const header = useMemo<SheetHeader>(
     () => ({
@@ -689,11 +646,8 @@ function PaseoAgentProviderFormSheet({
   );
   const apiKeyAuth = entry ? getPaseoAgentApiKeyAuth(entry) : null;
   const oauthAuth = entry ? getPaseoAgentOAuthAuth(entry) : null;
-  const trimmedName = name.trim();
-  const modelIds = useMemo(() => parsePaseoAgentModelIds(models), [models]);
-  const hasCatalogModels = Boolean(entry && entry.models.length > 0);
-  const hasConfiguredModels = hasCatalogModels || modelIds.length > 0;
-  const canSubmit = Boolean(entry && trimmedName.length > 0 && hasConfiguredModels && !saving);
+  const trimmedName = name?.trim() ?? "";
+  const canSubmit = Boolean(entry && trimmedName.length > 0 && !saving);
   const activeAuthorization =
     oauthState.status === "authorizing" ||
     oauthState.status === "completing" ||
@@ -712,7 +666,6 @@ function PaseoAgentProviderFormSheet({
         entry,
         name: trimmedName,
         apiKey,
-        modelIds: hasCatalogModels ? undefined : modelIds,
       }),
     )
       .then(() => {
@@ -724,7 +677,7 @@ function PaseoAgentProviderFormSheet({
         setError(describeError(err, "Failed to save provider"));
       })
       .finally(() => setSaving(false));
-  }, [apiKey, canSubmit, entry, hasCatalogModels, modelIds, onClose, setProvider, trimmedName]);
+  }, [apiKey, canSubmit, entry, onClose, setProvider, trimmedName]);
 
   const handleStartOAuth = useCallback(
     (mode: PaseoAgentOAuthMode) => {
@@ -737,7 +690,6 @@ function PaseoAgentProviderFormSheet({
         createPaseoAgentProviderInput({
           entry,
           name: trimmedName,
-          modelIds: hasCatalogModels ? undefined : modelIds,
         }),
       )
         .then(() => startOAuth(trimmedName, mode))
@@ -762,7 +714,7 @@ function PaseoAgentProviderFormSheet({
         })
         .finally(() => setSaving(false));
     },
-    [canSubmit, entry, hasCatalogModels, modelIds, setProvider, startOAuth, trimmedName],
+    [canSubmit, entry, setProvider, startOAuth, trimmedName],
   );
 
   const handleCompleteOAuth = useCallback(() => {
@@ -807,20 +759,9 @@ function PaseoAgentProviderFormSheet({
       onClose={onClose}
       desktopMaxWidth={480}
       snapPoints={FORM_SNAP_POINTS}
-      testID="paseo-agent-provider-form"
+      testID={oauthAuth ? "paseo-agent-oauth-sign-in" : "paseo-agent-provider-form"}
     >
       <View style={styles.formGroup}>
-        <ProviderNameAndModelsFields
-          entry={entry}
-          name={name}
-          models={models}
-          resetKey={resetKey}
-          lockName={lockName}
-          hasCatalogModels={hasCatalogModels}
-          onNameChange={setName}
-          onModelsChange={setModels}
-        />
-
         {apiKeyAuth ? (
           <ApiKeyFields
             auth={apiKeyAuth}
@@ -873,6 +814,103 @@ function PaseoAgentProviderFormSheet({
   );
 }
 
+function PaseoAgentProviderRenameSheet({
+  provider,
+  visible,
+  onClose,
+  renameProvider,
+}: {
+  provider: RedactedPaseoAgentProviderConfig | null;
+  visible: boolean;
+  onClose: () => void;
+  renameProvider: (
+    input: PaseoAgentRenameProviderInput,
+  ) => Promise<RedactedPaseoAgentProviderConfig | null>;
+}) {
+  const [displayName, setDisplayName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [resetKey, bumpResetKey] = useReducer((key: number) => key + 1, 0);
+
+  useEffect(() => {
+    if (visible && provider) {
+      setDisplayName(provider.displayName ?? provider.name);
+      setError(null);
+      setSaving(false);
+      bumpResetKey();
+    }
+  }, [provider, visible]);
+
+  const header = useMemo<SheetHeader>(() => ({ title: "Rename provider" }), []);
+  const trimmedDisplayName = displayName.trim();
+  const canSave = Boolean(provider && trimmedDisplayName.length > 0 && !saving);
+
+  const handleSave = useCallback(() => {
+    if (!provider || !canSave) return;
+    setError(null);
+    setSaving(true);
+    void renameProvider({ name: provider.name, displayName: trimmedDisplayName })
+      .then(() => {
+        onClose();
+        return undefined;
+      })
+      .catch((err: unknown) => {
+        setError(describeError(err, "Failed to rename provider"));
+      })
+      .finally(() => setSaving(false));
+  }, [canSave, onClose, provider, renameProvider, trimmedDisplayName]);
+
+  if (!provider) {
+    return null;
+  }
+
+  return (
+    <AdaptiveModalSheet
+      header={header}
+      visible={visible}
+      onClose={onClose}
+      desktopMaxWidth={420}
+      snapPoints={FORM_SNAP_POINTS}
+      testID="paseo-agent-provider-rename-form"
+    >
+      <View style={styles.formGroup}>
+        <Text style={styles.formLabel}>Provider name</Text>
+        <AdaptiveTextInput
+          testID="paseo-agent-provider-display-name"
+          accessibilityLabel="Provider name"
+          initialValue={displayName}
+          resetKey={`paseo-agent-provider-display-name-${resetKey}`}
+          value={displayName}
+          onChangeText={setDisplayName}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.formInput}
+        />
+        {error ? (
+          <Text style={styles.errorText} testID="paseo-agent-provider-rename-error">
+            {error}
+          </Text>
+        ) : null}
+        <View style={styles.formActions}>
+          <Button variant="secondary" size="sm" onPress={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onPress={handleSave}
+            disabled={!canSave}
+            loading={saving}
+            testID="paseo-agent-provider-rename-submit"
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </View>
+      </View>
+    </AdaptiveModalSheet>
+  );
+}
+
 export function PaseoAgentSettingsSheet({
   serverId,
   visible,
@@ -890,6 +928,7 @@ export function PaseoAgentSettingsSheet({
     setProvider,
     startOAuth,
     completeOAuth,
+    renameProvider,
   } = usePaseoAgentProviders(serverId);
   const activeConnection = useHostRuntimeSnapshot(serverId)?.activeConnection ?? null;
   const preferredOAuthMode = preferredPaseoAgentOAuthMode(activeConnection);
@@ -911,21 +950,31 @@ export function PaseoAgentSettingsSheet({
 
   const handleOpenPicker = useCallback(() => setAddSheet({ kind: "picker" }), []);
   const handleCloseSubSheet = useCallback(() => setAddSheet({ kind: "closed" }), []);
-  const handleSelectEntry = useCallback((entry: PaseoAgentCatalogEntry) => {
-    setAddSheet({ kind: "form", entry, lockName: false, returnToPicker: true });
-  }, []);
+  const handleSelectEntry = useCallback(
+    (entry: PaseoAgentCatalogEntry) => {
+      setAddSheet({
+        kind: "form",
+        entry,
+        name: nextPaseoAgentProviderName(entry, providers),
+        returnToPicker: true,
+      });
+    },
+    [providers],
+  );
   const handleReauth = useCallback(
     (provider: RedactedPaseoAgentProviderConfig, entry: PaseoAgentCatalogEntry) => {
       setAddSheet({
         kind: "form",
         entry,
-        initialName: provider.name,
-        lockName: true,
+        name: provider.name,
         returnToPicker: false,
       });
     },
     [],
   );
+  const handleRename = useCallback((provider: RedactedPaseoAgentProviderConfig) => {
+    setAddSheet({ kind: "rename", provider });
+  }, []);
   const handleBackFromForm = useCallback(() => {
     setAddSheet((current) =>
       current.kind === "form" && current.returnToPicker ? { kind: "picker" } : { kind: "closed" },
@@ -983,6 +1032,7 @@ export function PaseoAgentSettingsSheet({
             catalogEntry={catalogById.get(provider.providerType)}
             isFirst={index === 0}
             onReauth={handleReauth}
+            onRename={handleRename}
           />
         ))}
       </View>
@@ -1015,14 +1065,21 @@ export function PaseoAgentSettingsSheet({
         <PaseoAgentProviderFormSheet
           entry={addSheet.kind === "form" ? addSheet.entry : null}
           visible={addSheet.kind === "form"}
-          initialName={addSheet.kind === "form" ? addSheet.initialName : undefined}
-          lockName={addSheet.kind === "form" ? addSheet.lockName : false}
+          name={addSheet.kind === "form" ? addSheet.name : undefined}
           onBack={handleBackFromForm}
           onClose={handleCloseSubSheet}
           setProvider={setProvider}
           startOAuth={startOAuth}
           completeOAuth={completeOAuth}
           preferredOAuthMode={preferredOAuthMode}
+        />
+      ) : null}
+      {supported && catalogSupported ? (
+        <PaseoAgentProviderRenameSheet
+          provider={addSheet.kind === "rename" ? addSheet.provider : null}
+          visible={addSheet.kind === "rename"}
+          onClose={handleCloseSubSheet}
+          renameProvider={renameProvider}
         />
       ) : null}
     </>
@@ -1150,10 +1207,6 @@ const styles = StyleSheet.create((theme) => ({
     borderWidth: 1,
     borderColor: theme.colors.border,
     fontSize: theme.fontSize.sm,
-  },
-  modelsInput: {
-    minHeight: 80,
-    textAlignVertical: "top",
   },
   authorizationBox: {
     gap: theme.spacing[2],

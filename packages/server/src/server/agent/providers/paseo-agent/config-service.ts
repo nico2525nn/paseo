@@ -40,6 +40,7 @@ interface PaseoAgentConfigServiceOptions {
 interface SetProviderInput {
   name: string;
   providerType: string;
+  displayName?: string;
   options: {
     apiKey?: string;
     baseUrl?: string;
@@ -170,6 +171,9 @@ function redactedProviders(
       available: auth.configured,
       error: null,
     };
+    if (entry.displayName) {
+      provider.displayName = entry.displayName;
+    }
     provider.baseUrl = settings.baseUrl;
     provider.api = settings.api;
     return provider;
@@ -223,12 +227,36 @@ export class PaseoAgentConfigService {
           ...current.providers,
           [input.name]: {
             type: catalogEntry.id,
+            ...((input.displayName ?? current.providers?.[input.name]?.displayName)
+              ? { displayName: input.displayName ?? current.providers?.[input.name]?.displayName }
+              : {}),
             options: providerOptionsForPersist(input.options, catalogEntry),
           },
         },
       }),
     );
     return this.requireRedactedProvider(next, input.name);
+  }
+
+  renameProvider(name: string, displayName: string): RedactedPaseoAgentProviderConfig {
+    const trimmedDisplayName = displayName.trim();
+    const next = this.updateConfig((current) => {
+      const provider = current.providers?.[name];
+      if (!provider) {
+        throw new Error(`Paseo Agent provider '${name}' is not configured.`);
+      }
+      return PaseoAgentConfigSchema.parse({
+        ...current,
+        providers: {
+          ...current.providers,
+          [name]: {
+            ...provider,
+            displayName: trimmedDisplayName,
+          },
+        },
+      });
+    });
+    return this.requireRedactedProvider(next, name);
   }
 
   removeProvider(name: string): boolean {

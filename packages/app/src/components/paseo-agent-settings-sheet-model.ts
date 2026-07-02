@@ -93,6 +93,24 @@ export function parsePaseoAgentModelIds(raw: string): string[] {
   return ids;
 }
 
+export function nextPaseoAgentProviderName(
+  entry: PaseoAgentCatalogEntry,
+  providers: RedactedPaseoAgentProviderConfig[],
+): string {
+  const baseName = entry.label.trim() || entry.id;
+  const existingNames = new Set(providers.map((provider) => provider.name));
+  if (!existingNames.has(baseName)) {
+    return baseName;
+  }
+
+  for (let index = 1; ; index += 1) {
+    const candidate = `${baseName} (${index})`;
+    if (!existingNames.has(candidate)) {
+      return candidate;
+    }
+  }
+}
+
 export function createPaseoAgentProviderInput(input: {
   entry: PaseoAgentCatalogEntry;
   name: string;

@@ -1808,6 +1808,8 @@ export class Session {
         return this.handlePaseoAgentSetProviderRequest(msg);
       case "config.paseo_agent.remove_provider.request":
         return this.handlePaseoAgentRemoveProviderRequest(msg);
+      case "config.paseo_agent.rename_provider.request":
+        return this.handlePaseoAgentRenameProviderRequest(msg);
       case "config.paseo_agent.oauth.start.request":
         return this.handlePaseoAgentOAuthStartRequest(msg);
       case "config.paseo_agent.oauth.complete.request":
@@ -1931,6 +1933,7 @@ export class Session {
     try {
       const provider = this.createPaseoAgentConfigService().setProvider({
         name: msg.name,
+        displayName: msg.displayName,
         providerType: msg.providerType,
         options: msg.options,
       });
@@ -1987,6 +1990,41 @@ export class Session {
           requestId: msg.requestId,
           success: false,
           removed: false,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async handlePaseoAgentRenameProviderRequest(
+    msg: Extract<SessionInboundMessage, { type: "config.paseo_agent.rename_provider.request" }>,
+  ): Promise<void> {
+    try {
+      const provider = this.createPaseoAgentConfigService().renameProvider(
+        msg.name,
+        msg.displayName,
+      );
+      await this.refreshPaseoAgentRuntimeSnapshot();
+      this.emit({
+        type: "config.paseo_agent.rename_provider.response",
+        payload: {
+          requestId: msg.requestId,
+          success: true,
+          provider,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, providerName: msg.name },
+        "Failed to rename Paseo Agent provider",
+      );
+      this.emit({
+        type: "config.paseo_agent.rename_provider.response",
+        payload: {
+          requestId: msg.requestId,
+          success: false,
+          provider: null,
           error: getErrorMessage(error),
         },
       });

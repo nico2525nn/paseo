@@ -5,7 +5,9 @@ export const BUILTIN_PROVIDER_ICON_NAMES = [
   "kiro",
   "minimax",
   "omp",
+  "openai",
   "opencode",
+  "openrouter",
   "paseo",
   "pi",
 ];

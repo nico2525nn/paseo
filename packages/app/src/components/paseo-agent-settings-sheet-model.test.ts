@@ -9,6 +9,7 @@ import {
   getPaseoAgentApiKeyAuth,
   getPaseoAgentOAuthAuth,
   isPaseoAgentCatalogEntrySupported,
+  nextPaseoAgentProviderName,
   parsePaseoAgentModelIds,
   paseoAgentAuthBadge,
   paseoAgentProviderLabel,
@@ -93,6 +94,21 @@ describe("paseo-agent-settings-sheet-model", () => {
         gamma/deep
       `),
     ).toEqual(["alpha/fast", "beta/steady", "gamma/deep"]);
+  });
+
+  it("uses the catalog label for the first provider instance", () => {
+    expect(nextPaseoAgentProviderName(catalogEntry({ label: "Acme Cloud" }), [])).toBe(
+      "Acme Cloud",
+    );
+  });
+
+  it("numbers later provider instances from the catalog label", () => {
+    expect(
+      nextPaseoAgentProviderName(catalogEntry({ label: "Acme Cloud" }), [
+        providerConfig({ name: "Acme Cloud" }),
+        providerConfig({ name: "Acme Cloud (1)" }),
+      ]),
+    ).toBe("Acme Cloud (2)");
   });
 
   it("builds a generic provider payload with a trimmed explicit key", () => {
