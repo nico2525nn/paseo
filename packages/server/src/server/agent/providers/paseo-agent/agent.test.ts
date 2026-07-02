@@ -108,6 +108,7 @@ class FakeInProcessPiSession {
       totalMessages: 2,
       tokens: { input: 3, output: 5, cacheRead: 2, cacheWrite: 0, total: 10 },
       cost: 0.01,
+      contextUsage: { contextWindow: 200000, tokens: 1234, percentage: 0.6 },
     };
   }
 
@@ -452,7 +453,14 @@ describe("PaseoAgentSession runtime events", () => {
     await expect(resultPromise).resolves.toEqual({
       sessionId: "pi-session-1",
       finalText: "done",
-      usage: { inputTokens: 3, cachedInputTokens: 2, outputTokens: 5, totalCostUsd: 0.01 },
+      usage: {
+        inputTokens: 3,
+        cachedInputTokens: 2,
+        outputTokens: 5,
+        totalCostUsd: 0.01,
+        contextWindowMaxTokens: 200000,
+        contextWindowUsedTokens: 1234,
+      },
       timeline: [
         { type: "reasoning", text: "thinking" },
         {

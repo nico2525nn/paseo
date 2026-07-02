@@ -327,10 +327,26 @@ export function toAgentUsage(stats: SessionStats): AgentUsage | undefined {
   const cachedInputTokens = stats.tokens.cacheRead;
   const outputTokens = stats.tokens.output;
   const totalCostUsd = stats.cost;
-  if (inputTokens === 0 && cachedInputTokens === 0 && outputTokens === 0 && totalCostUsd === 0) {
+  const contextWindowMaxTokens = stats.contextUsage?.contextWindow ?? undefined;
+  const contextWindowUsedTokens = stats.contextUsage?.tokens ?? undefined;
+  if (
+    inputTokens === 0 &&
+    cachedInputTokens === 0 &&
+    outputTokens === 0 &&
+    totalCostUsd === 0 &&
+    contextWindowMaxTokens === undefined &&
+    contextWindowUsedTokens === undefined
+  ) {
     return undefined;
   }
-  return { inputTokens, cachedInputTokens, outputTokens, totalCostUsd };
+  return {
+    inputTokens,
+    cachedInputTokens,
+    outputTokens,
+    totalCostUsd,
+    ...(typeof contextWindowMaxTokens === "number" ? { contextWindowMaxTokens } : {}),
+    ...(typeof contextWindowUsedTokens === "number" ? { contextWindowUsedTokens } : {}),
+  };
 }
 
 const PiTextContentSchema = z.object({ type: z.literal("text"), text: z.string() });
