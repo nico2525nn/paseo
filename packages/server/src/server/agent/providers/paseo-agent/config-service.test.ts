@@ -7,7 +7,7 @@ import { createTestLogger } from "../../../../test-utils/test-logger.js";
 import { loadPersistedConfig, savePersistedConfig } from "../../../persisted-config.js";
 import { PaseoAgentConfigService } from "./config-service.js";
 import { PaseoAgentConfigSchema } from "./config.js";
-import { paseoAgentAuthStoragePath } from "./oauth-store.js";
+import { paseoAgentAuthStoragePath, storeOAuthCredential } from "./oauth-store.js";
 
 describe("PaseoAgentConfigService", () => {
   let home: string;
@@ -54,6 +54,48 @@ describe("PaseoAgentConfigService", () => {
     expect(onConfigChanged).toHaveBeenCalledWith(
       expect.objectContaining({ providers: expect.any(Object) }),
     );
+  });
+
+  test("reports API-key default env auth state without resolving the key value", () => {
+    const missingService = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+      env: { PASEO_HOME: home },
+    });
+    missingService.setProvider({
+      name: "openrouter-main",
+      providerType: "openrouter",
+      options: {
+        models: [{ id: "anthropic/claude-3.7-sonnet" }],
+      },
+    });
+
+    expect(missingService.getProviders().providers[0]).toMatchObject({
+      auth: {
+        kind: "api_key",
+        configured: false,
+        source: "default_env",
+        hint: "OPENROUTER_API_KEY",
+      },
+      available: false,
+    });
+
+    const presentService = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+      env: { PASEO_HOME: home, OPENROUTER_API_KEY: "sk-env-secret" },
+    });
+
+    expect(presentService.getProviders().providers[0]).toMatchObject({
+      auth: {
+        kind: "api_key",
+        configured: true,
+        source: "default_env",
+        hint: "OPENROUTER_API_KEY",
+      },
+      available: true,
+    });
+    expect(JSON.stringify(presentService.getProviders())).not.toContain("sk-env-secret");
   });
 
   test("rejects an unknown provider type with a clear error and persists nothing", () => {
@@ -185,6 +227,10 @@ describe("PaseoAgentConfigService", () => {
       type: "oauth",
       access: "access-token",
       refresh: "refresh-token",
+      binding: {
+        flow: "openai-codex",
+        baseUrl: "https://chatgpt.com/backend-api",
+      },
       futureField: { keep: true },
     });
     expect(authPath).toBe(join(home, "paseo-agent", "auth.json"));
@@ -219,6 +265,47 @@ describe("PaseoAgentConfigService", () => {
     ]);
     expect(JSON.stringify(providers)).not.toContain("access-token");
     expect(JSON.stringify(providers)).not.toContain("refresh-token");
+  });
+
+  test("reports OAuth as missing or needing attention for absent and mismatched credentials", () => {
+    const service = new PaseoAgentConfigService({
+      paseoHome: home,
+      logger: createTestLogger(),
+    });
+    service.setProvider({
+      name: "chatgpt",
+      providerType: "chatgpt",
+      options: {},
+    });
+
+    expect(service.getProviders().providers[0]).toMatchObject({
+      auth: { kind: "oauth", configured: false },
+      available: false,
+    });
+
+    storeOAuthCredential({
+      providerInstance: "chatgpt",
+      env: { PASEO_HOME: home },
+      binding: { flow: "openai-codex", baseUrl: "https://chatgpt.example.test/changed" },
+      credential: {
+        type: "oauth",
+        access: "access-token",
+        refresh: "refresh-token",
+        expires: 123,
+      },
+    });
+
+    expect(service.getProviders().providers[0]).toMatchObject({
+      auth: {
+        kind: "oauth",
+        configured: false,
+        source: "stored",
+        hint: "binding_mismatch",
+      },
+      available: false,
+    });
+    expect(JSON.stringify(service.getProviders())).not.toContain("access-token");
+    expect(JSON.stringify(service.getProviders())).not.toContain("refresh-token");
   });
 
   test("removes providers and clears a default model owned by that provider", () => {

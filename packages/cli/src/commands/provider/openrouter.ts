@@ -101,7 +101,7 @@ function toConfiguredItem(provider: RedactedPaseoAgentProviderConfig): OpenRoute
   return {
     name: provider.name,
     providerType: provider.providerType,
-    auth: provider.auth.configured ? (provider.auth.source ?? "configured") : "not configured",
+    auth: provider.auth?.configured ? (provider.auth.source ?? "configured") : "not configured",
     available: provider.available ? "yes" : "no",
     models: provider.models.map((model) => model.id).join(", "),
   };

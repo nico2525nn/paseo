@@ -5,6 +5,7 @@ import {
   isRefreshTokenExpressionConfigured,
   resolveRefreshTokenExpression,
 } from "./oauth-credentials.js";
+import type { OAuthCredentialBinding } from "./oauth-store.js";
 import type { PaseoAgentModelProvider, PaseoAgentModelReference } from "./pi-services.js";
 import {
   requirePaseoAgentCatalogEntry,
@@ -225,7 +226,8 @@ export function listPaseoAgentModels(config: PaseoAgentConfig): AgentModelDefini
 export function paseoAgentHasUsableModel(
   config: PaseoAgentConfig,
   env: NodeJS.ProcessEnv = process.env,
-  isOAuthAuthed: (providerInstance: string) => boolean = () => false,
+  isOAuthAuthed: (providerInstance: string, binding: OAuthCredentialBinding) => boolean = () =>
+    false,
 ): boolean {
   return entries(config).some(([name, entry]) => {
     const catalogEntry = requirePaseoAgentCatalogEntry(entry.type);
@@ -239,7 +241,10 @@ export function paseoAgentHasUsableModel(
       ) {
         return true;
       }
-      return isOAuthAuthed(name);
+      return isOAuthAuthed(name, {
+        flow: catalogEntry.auth.flow,
+        baseUrl: resolvePaseoAgentProviderSettings(entry, catalogEntry).baseUrl,
+      });
     }
     return isAuthConfigured(resolvePaseoAgentProviderSettings(entry, catalogEntry).apiKey, env);
   });

@@ -16,8 +16,16 @@ import {
   resolvePaseoAgentProviderModels,
   resolvePaseoAgentProviderSettings,
 } from "./config.js";
-import { requirePaseoAgentCatalogEntry } from "./catalog.js";
-import { hasStoredOAuthCredential, storeOAuthCredential } from "./oauth-store.js";
+import {
+  PASEO_AGENT_PROVIDER_CATALOG,
+  type PaseoAgentCatalogEntry,
+  requirePaseoAgentCatalogEntry,
+} from "./catalog.js";
+import {
+  getStoredOAuthCredentialState,
+  storeOAuthCredential,
+  type OAuthCredentialBinding,
+} from "./oauth-store.js";
 import { isRefreshTokenExpressionConfigured } from "./oauth-credentials.js";
 import { findEnvReferences } from "./env-references.js";
 
@@ -83,6 +91,23 @@ function authStateForApiKey(
   return { kind: "api_key", configured: true, source: "literal" };
 }
 
+function copyCatalogEntry(entry: PaseoAgentCatalogEntry): PaseoAgentCatalogEntry {
+  return {
+    ...entry,
+    ...(entry.headers ? { headers: { ...entry.headers } } : {}),
+    ...(entry.compat ? { compat: { ...entry.compat } } : {}),
+    auth: { ...entry.auth },
+    models: entry.models.map((model) => ({ ...model })),
+  };
+}
+
+function oauthBindingForSettings(
+  flow: string,
+  settings: ReturnType<typeof resolvePaseoAgentProviderSettings>,
+): OAuthCredentialBinding {
+  return { flow, baseUrl: settings.baseUrl };
+}
+
 function readPaseoAgentConfig(persisted: PersistedConfig): PaseoAgentConfig {
   return validatePaseoAgentConfig(PaseoAgentConfigSchema.parse(persisted.agents?.paseo ?? {}));
 }
@@ -110,10 +135,23 @@ function redactedProviders(
       if (hasRefreshToken) {
         auth = { kind: "oauth", configured: true, source: "refresh_token" };
       } else {
-        const stored = hasStoredOAuthCredential(name, env);
-        auth = stored
-          ? { kind: "oauth", configured: true, source: "stored" }
-          : { kind: "oauth", configured: false };
+        const stored = getStoredOAuthCredentialState(
+          name,
+          env,
+          oauthBindingForSettings(catalogEntry.auth.flow, settings),
+        );
+        if (stored.present && stored.bindingMatches) {
+          auth = { kind: "oauth", configured: true, source: "stored" };
+        } else if (stored.present) {
+          auth = {
+            kind: "oauth",
+            configured: false,
+            source: "stored",
+            hint: "binding_mismatch",
+          };
+        } else {
+          auth = { kind: "oauth", configured: false };
+        }
       }
     } else {
       auth = authStateForApiKey(entry.options.apiKey, catalogEntry.auth.envVar, env);
@@ -158,6 +196,10 @@ export class PaseoAgentConfigService {
     this.onConfigChanged = options.onConfigChanged;
   }
 
+  getCatalog(): PaseoAgentCatalogEntry[] {
+    return PASEO_AGENT_PROVIDER_CATALOG.map(copyCatalogEntry);
+  }
+
   getProviders(): { defaultModel: string | null; providers: RedactedPaseoAgentProviderConfig[] } {
     const config = readPaseoAgentConfig(loadPersistedConfig(this.paseoHome, this.logger));
     return {
@@ -198,7 +240,7 @@ export class PaseoAgentConfigService {
     return removed;
   }
 
-  storeOAuthCredential(providerName: string, credential: PaseoAgentOAuthCredential): void {
+  getOAuthCredentialBinding(providerName: string): OAuthCredentialBinding {
     const config = readPaseoAgentConfig(loadPersistedConfig(this.paseoHome, this.logger));
     const entry = config.providers?.[providerName];
     if (!entry) {
@@ -208,12 +250,38 @@ export class PaseoAgentConfigService {
     if (catalogEntry.auth.kind !== "oauth") {
       throw new Error(`Paseo Agent provider '${providerName}' does not use OAuth.`);
     }
+    const settings = resolvePaseoAgentProviderSettings(entry, catalogEntry);
+    return oauthBindingForSettings(catalogEntry.auth.flow, settings);
+  }
+
+  storeOAuthCredential(
+    providerName: string,
+    credential: PaseoAgentOAuthCredential,
+    binding: OAuthCredentialBinding | undefined = undefined,
+  ): PaseoAgentProviderAuthState {
+    const config = readPaseoAgentConfig(loadPersistedConfig(this.paseoHome, this.logger));
+    const entry = config.providers?.[providerName];
+    if (!entry) {
+      throw new Error(`Paseo Agent provider '${providerName}' is not configured.`);
+    }
+    const catalogEntry = requirePaseoAgentCatalogEntry(entry.type);
+    if (catalogEntry.auth.kind !== "oauth") {
+      throw new Error(`Paseo Agent provider '${providerName}' does not use OAuth.`);
+    }
+    const settings = resolvePaseoAgentProviderSettings(entry, catalogEntry);
     storeOAuthCredential({
       providerInstance: providerName,
       credential,
+      binding: binding ?? oauthBindingForSettings(catalogEntry.auth.flow, settings),
       env: this.env,
     });
     this.onConfigChanged?.(config);
+    return (
+      this.requireRedactedProvider(config, providerName).auth ?? {
+        kind: "oauth",
+        configured: false,
+      }
+    );
   }
 
   private requireRedactedProvider(

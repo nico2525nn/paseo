@@ -2,6 +2,9 @@ import type { RedactedPaseoAgentProviderConfig } from "@getpaseo/protocol/messag
 import type { PaseoAgentSetProviderInput } from "@/hooks/use-paseo-agent-providers";
 
 export function paseoAgentAuthLabel(auth: RedactedPaseoAgentProviderConfig["auth"]): string {
+  if (!auth) {
+    return "Auth state unavailable";
+  }
   if (auth.kind === "oauth") {
     return auth.configured ? "ChatGPT login stored" : "Login required";
   }

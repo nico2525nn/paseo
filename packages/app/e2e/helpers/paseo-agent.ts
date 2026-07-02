@@ -12,7 +12,7 @@ type PaseoAgentDaemonClient = Pick<
   | "connect"
   | "removePaseoAgentProvider"
   | "setPaseoAgentProvider"
-  | "storePaseoAgentChatGptCredential"
+  | "storePaseoAgentOAuthCredential"
 >;
 
 interface OpenRouterProviderInput {
@@ -82,8 +82,8 @@ export async function seedChatGptProvider(providerName: string): Promise<void> {
         models: [{ id: "gpt-5.3-codex", reasoning: true }],
       },
     });
-    await client.storePaseoAgentChatGptCredential({
-      providerName,
+    await client.storePaseoAgentOAuthCredential({
+      name: providerName,
       credential: {
         type: "oauth",
         access: "fake-access-token",

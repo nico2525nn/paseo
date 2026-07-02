@@ -22,6 +22,7 @@ import {
 
 const PROVIDER_INSTANCE = "chatgpt";
 const OAUTH_FLOW = "openai-codex";
+const OAUTH_BASE_URL = "https://chatgpt.com/backend-api";
 
 interface LoginChatgptOptions extends CommandOptions {
   deviceCode?: boolean;
@@ -41,7 +42,7 @@ interface LoginCommandDependencies {
   connectDaemon: (options: {
     host?: string;
   }) => Promise<
-    Pick<DaemonClient, "getLastServerInfoMessage" | "storePaseoAgentChatGptCredential" | "close">
+    Pick<DaemonClient, "getLastServerInfoMessage" | "storePaseoAgentOAuthCredential" | "close">
   >;
   openBrowser: (url: string) => boolean;
   promptForCode: (message: string) => Promise<string>;
@@ -139,6 +140,7 @@ async function runChatgptLogin(
     write("Paseo login — ChatGPT/Codex subscription (headless device-code flow)\n");
     const { path } = await dependencies.loginDeviceCode({
       flow: OAUTH_FLOW,
+      baseUrl: OAUTH_BASE_URL,
       providerInstance: PROVIDER_INSTANCE,
       env,
       onDeviceCode: (info) => printDeviceCode(write, info),
@@ -176,8 +178,8 @@ async function runChatgptLogin(
       onProgress: (message) => write(message),
       promptForCode: dependencies.promptForCode,
     });
-    const result = await client.storePaseoAgentChatGptCredential({
-      providerName: PROVIDER_INSTANCE,
+    const result = await client.storePaseoAgentOAuthCredential({
+      name: PROVIDER_INSTANCE,
       credential,
     });
     if (!result.success || result.error) {

@@ -30,7 +30,7 @@ describe("Paseo Agent config RPC schemas", () => {
             name: "kimi-main",
             providerType: "kimi-coding",
             models: [{ id: "kimi-k3" }],
-            auth: { kind: "api_key", configured: true, source: "env" },
+            auth: { kind: "future_auth_kind", configured: true, source: "future_source" },
             available: true,
             error: null,
           },
@@ -68,11 +68,120 @@ describe("Paseo Agent config RPC schemas", () => {
     expect(JSON.stringify(parsed)).not.toContain("apiKey");
   });
 
+  test("parses get_catalog request and response with forward-tolerant entries", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "config.paseo_agent.get_catalog.request",
+      requestId: "req-catalog",
+    });
+    const response = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.get_catalog.response",
+      payload: {
+        requestId: "req-catalog",
+        catalog: [
+          {
+            id: "future-provider",
+            label: "Future Provider",
+            iconName: "sparkles",
+            docsUrl: "https://docs.example.test/provider",
+            api: "future-api",
+            baseUrl: "https://api.example.test",
+            headers: { "User-Agent": "PaseoTest/1" },
+            compat: { minHost: "0.1.104" },
+            auth: { kind: "future_oauth", flow: "future-flow", extraAuthField: true },
+            models: [
+              {
+                id: "future-model",
+                label: "Future Model",
+                futureModelField: "kept",
+              },
+            ],
+            futureEntryField: { keep: true },
+          },
+        ],
+        error: null,
+      },
+    });
+
+    expect(request.type).toBe("config.paseo_agent.get_catalog.request");
+    expect(response.payload.catalog[0]?.auth.kind).toBe("future_oauth");
+    expect(response.payload.catalog[0]?.futureEntryField).toEqual({ keep: true });
+    expect(response.payload.catalog[0]?.models[0]?.futureModelField).toBe("kept");
+  });
+
+  test("parses oauth.start request and device-code response", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.start.request",
+      requestId: "req-oauth-start",
+      name: "subscription",
+    });
+    const response = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.start.response",
+      payload: {
+        requestId: "req-oauth-start",
+        success: true,
+        name: "subscription",
+        authorization: {
+          kind: "device_code",
+          userCode: "ABCD-EFGH",
+          verificationUri: "https://auth.example.test/device",
+          intervalSeconds: 5,
+          expiresInSeconds: 900,
+          futureField: "kept",
+        },
+        error: null,
+      },
+    });
+
+    expect(request.name).toBe("subscription");
+    expect(response.payload.authorization?.kind).toBe("device_code");
+    expect(response.payload.authorization?.futureField).toBe("kept");
+  });
+
+  test("parses oauth.start auth-url response", () => {
+    const parsed = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.start.response",
+      payload: {
+        requestId: "req-oauth-start-url",
+        success: true,
+        name: "subscription",
+        authorization: {
+          kind: "auth_url",
+          url: "https://auth.example.test/oauth",
+          instructions: "Open this URL to continue.",
+        },
+        error: null,
+      },
+    });
+
+    expect(parsed.payload.authorization?.url).toBe("https://auth.example.test/oauth");
+  });
+
+  test("parses oauth.complete request and response", () => {
+    const request = SessionInboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.complete.request",
+      requestId: "req-oauth-complete",
+      name: "subscription",
+    });
+    const response = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.complete.response",
+      payload: {
+        requestId: "req-oauth-complete",
+        success: true,
+        name: "subscription",
+        auth: { kind: "oauth", configured: true, source: "stored" },
+        error: null,
+      },
+    });
+
+    expect(request.name).toBe("subscription");
+    expect(response.payload.auth?.configured).toBe(true);
+  });
+
   test("preserves future OAuth credential fields on inbound schema parse", () => {
     const parsed = SessionInboundMessageSchema.parse({
-      type: "config.paseo_agent.store_chatgpt_credential.request",
+      type: "config.paseo_agent.oauth.store_credential.request",
       requestId: "req-oauth",
-      providerName: "chatgpt",
+      name: "subscription",
       credential: {
         type: "oauth",
         access: "access-token",
@@ -84,6 +193,23 @@ describe("Paseo Agent config RPC schemas", () => {
     });
 
     expect(parsed.credential.futureField).toEqual({ keep: true });
+  });
+
+  test("parses oauth.store_credential response without credential material", () => {
+    const parsed = SessionOutboundMessageSchema.parse({
+      type: "config.paseo_agent.oauth.store_credential.response",
+      payload: {
+        requestId: "req-oauth",
+        success: true,
+        name: "subscription",
+        auth: { kind: "oauth", configured: true, source: "stored" },
+        error: null,
+      },
+    });
+
+    expect(parsed.payload.name).toBe("subscription");
+    expect(JSON.stringify(parsed)).not.toContain("access-token");
+    expect(JSON.stringify(parsed)).not.toContain("refresh-token");
   });
 
   test("parses ChatGPT provider config separately from credential storage", () => {

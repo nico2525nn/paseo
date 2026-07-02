@@ -97,12 +97,15 @@ import type {
 import type {
   MutableDaemonConfig,
   MutableDaemonConfigPatch,
+  PaseoAgentGetCatalogResponse,
   PaseoAgentGetProvidersResponse,
+  PaseoAgentOAuthCompleteResponse,
   PaseoAgentOAuthCredential,
+  PaseoAgentOAuthStartResponse,
+  PaseoAgentOAuthStoreCredentialResponse,
   PaseoAgentRemoveProviderResponse,
   PaseoAgentSetProviderRequest,
   PaseoAgentSetProviderResponse,
-  PaseoAgentStoreChatGptCredentialResponse,
 } from "@getpaseo/protocol/messages";
 import { isRelayClientWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
 import { terminalSubscriptionKey } from "@getpaseo/protocol/terminal-subscription-key";
@@ -3882,6 +3885,16 @@ export class DaemonClient {
     });
   }
 
+  async getPaseoAgentCatalog(requestId?: string): Promise<PaseoAgentGetCatalogResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "config.paseo_agent.get_catalog.request",
+      },
+      timeout: 10000,
+    });
+  }
+
   async setPaseoAgentProvider(
     input: Omit<PaseoAgentSetProviderRequest, "type" | "requestId"> & { requestId?: string },
   ): Promise<PaseoAgentSetProviderResponse["payload"]> {
@@ -3911,16 +3924,44 @@ export class DaemonClient {
     });
   }
 
-  async storePaseoAgentChatGptCredential(input: {
-    providerName: string;
+  async startPaseoAgentOAuth(
+    name: string,
+    requestId?: string,
+  ): Promise<PaseoAgentOAuthStartResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "config.paseo_agent.oauth.start.request",
+        name,
+      },
+      timeout: 30000,
+    });
+  }
+
+  async completePaseoAgentOAuth(
+    name: string,
+    requestId?: string,
+  ): Promise<PaseoAgentOAuthCompleteResponse["payload"]> {
+    return this.sendNamespacedCorrelatedSessionRequest({
+      requestId,
+      message: {
+        type: "config.paseo_agent.oauth.complete.request",
+        name,
+      },
+      timeout: 30000,
+    });
+  }
+
+  async storePaseoAgentOAuthCredential(input: {
+    name: string;
     credential: PaseoAgentOAuthCredential;
     requestId?: string;
-  }): Promise<PaseoAgentStoreChatGptCredentialResponse["payload"]> {
+  }): Promise<PaseoAgentOAuthStoreCredentialResponse["payload"]> {
     return this.sendNamespacedCorrelatedSessionRequest({
       requestId: input.requestId,
       message: {
-        type: "config.paseo_agent.store_chatgpt_credential.request",
-        providerName: input.providerName,
+        type: "config.paseo_agent.oauth.store_credential.request",
+        name: input.name,
         credential: input.credential,
       },
       timeout: 30000,

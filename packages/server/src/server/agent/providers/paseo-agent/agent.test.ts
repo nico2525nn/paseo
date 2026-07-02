@@ -184,6 +184,7 @@ describe("PaseoAgentClient", () => {
     storeOAuthCredential({
       providerInstance: "chatgpt",
       credential: { type: "oauth", access: "access-token", refresh: "refresh-token", expires: 0 },
+      binding: { flow: "openai-codex", baseUrl: "https://chatgpt.com/backend-api" },
       env: { PASEO_HOME: paseoHome },
     });
     const config = PaseoAgentConfigSchema.parse({
@@ -204,6 +205,27 @@ describe("PaseoAgentClient", () => {
         process.env.PASEO_HOME = previousPaseoHome;
       }
     }
+  });
+
+  it("does not treat an endpoint-mismatched OAuth credential as available", async () => {
+    const paseoHome = mkdtempSync(join(tmpdir(), "paseo-agent-client-"));
+    tempDirs.push(paseoHome);
+    storeOAuthCredential({
+      providerInstance: "chatgpt",
+      credential: { type: "oauth", access: "access-token", refresh: "refresh-token", expires: 0 },
+      binding: { flow: "openai-codex", baseUrl: "https://chatgpt.example.test/changed" },
+      env: { PASEO_HOME: paseoHome },
+    });
+    const config = PaseoAgentConfigSchema.parse({
+      providers: {
+        chatgpt: {
+          type: "chatgpt",
+        },
+      },
+    });
+
+    const client = new PaseoAgentClient({ logger: createTestLogger(), config, paseoHome });
+    expect(await client.isAvailable()).toBe(false);
   });
 
   it("lists only configured models, never Pi disk/default models", async () => {

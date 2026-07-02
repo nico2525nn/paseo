@@ -44,7 +44,11 @@ import {
   type PiTrackedToolCall,
 } from "./event-mapping.js";
 import { createMcpToolBridge, type McpToolBridge } from "./mcp-bridge.js";
-import { createPaseoAgentAuthStorage, hasStoredOAuthCredential } from "./oauth-store.js";
+import {
+  createBoundPaseoAgentAuthStorage,
+  hasStoredOAuthCredential,
+  type OAuthCredentialBinding,
+} from "./oauth-store.js";
 import { createPaseoAgentSession, type PaseoAgentSessionHandle } from "./pi-services.js";
 import { createToolPermissionPolicy } from "./agent-permissions.js";
 import {
@@ -100,6 +104,21 @@ function isAbortError(error: unknown): boolean {
     return true;
   }
   return /\brequest was aborted\b|\babort(ed)?\b/i.test(errorToMessage(error));
+}
+
+function oauthCredentialBindings(
+  providers: Awaited<ReturnType<typeof paseoAgentModelProviders>>,
+): Record<string, OAuthCredentialBinding> {
+  const bindings: Record<string, OAuthCredentialBinding> = {};
+  for (const provider of providers) {
+    if (provider.oauth) {
+      bindings[provider.name] = {
+        flow: provider.oauth.flow,
+        baseUrl: provider.config.baseUrl ?? "",
+      };
+    }
+  }
+  return bindings;
 }
 
 interface PaseoAgentClientOptions {
@@ -564,7 +583,10 @@ export class PaseoAgentClient implements AgentClient {
     // the stored credential and persists refreshed tokens (rotation) back to it.
     const usesOAuth = modelProviders.some((provider) => provider.oauth);
     const authStorage = usesOAuth
-      ? createPaseoAgentAuthStorage(envForPaseoHome(this.paseoHome))
+      ? createBoundPaseoAgentAuthStorage(
+          oauthCredentialBindings(modelProviders),
+          envForPaseoHome(this.paseoHome),
+        )
       : undefined;
 
     // Bridge Paseo-injected MCP servers (e.g. the `paseo` HTTP server) into Pi tools.
@@ -607,8 +629,8 @@ export class PaseoAgentClient implements AgentClient {
 
   async isAvailable(): Promise<boolean> {
     const env = envForPaseoHome(this.paseoHome);
-    return paseoAgentHasUsableModel(this.config, env, (providerInstance) =>
-      hasStoredOAuthCredential(providerInstance, env),
+    return paseoAgentHasUsableModel(this.config, env, (providerInstance, binding) =>
+      hasStoredOAuthCredential(providerInstance, env, binding),
     );
   }
 

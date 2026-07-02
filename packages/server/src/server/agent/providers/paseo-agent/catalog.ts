@@ -1,4 +1,5 @@
 export interface PaseoAgentCatalogModel {
+  [key: string]: unknown;
   id: string;
   label?: string;
   api?: string;
@@ -8,6 +9,7 @@ export interface PaseoAgentCatalogModel {
 }
 
 export interface PaseoAgentApiKeyAuth {
+  [key: string]: unknown;
   kind: "api_key";
   envVar: string;
   keyUrl?: string;
@@ -16,6 +18,7 @@ export interface PaseoAgentApiKeyAuth {
 }
 
 export interface PaseoAgentOAuthAuth {
+  [key: string]: unknown;
   kind: "oauth";
   flow: string;
 }
@@ -23,6 +26,7 @@ export interface PaseoAgentOAuthAuth {
 export type PaseoAgentCatalogAuth = PaseoAgentApiKeyAuth | PaseoAgentOAuthAuth;
 
 export interface PaseoAgentCatalogEntry {
+  [key: string]: unknown;
   id: string;
   label: string;
   iconName?: string;

@@ -25,6 +25,7 @@ describe.skipIf(isPlatform("win32"))("oauth-store POSIX-only", () => {
 
     const { path } = await loginAndStoreOAuth({
       flow: "paseo-test-oauth",
+      baseUrl: "https://api.example.test/oauth",
       providerInstance: "chatgpt",
       env,
       onDeviceCode: () => {},
@@ -38,6 +39,7 @@ describe.skipIf(isPlatform("win32"))("oauth-store POSIX-only", () => {
     const { path } = storeOAuthCredential({
       providerInstance: "chatgpt",
       env,
+      binding: { flow: "paseo-test-oauth", baseUrl: "https://api.example.test/oauth" },
       credential: { type: "oauth", access: "ac", refresh: "rt", expires: 123 },
     });
 

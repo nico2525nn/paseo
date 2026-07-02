@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve as resolvePath } from "path";
 import pino from "pino";
@@ -1152,6 +1152,160 @@ function createTerminalManagerStub(options?: { setTerminalTitle?: ReturnType<typ
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe("Paseo Agent config catalog RPCs", () => {
+  test("get_catalog returns static manifests without credential material", async () => {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({ messages });
+
+    await session.handleMessage({
+      type: "config.paseo_agent.get_catalog.request",
+      requestId: "catalog-1",
+    });
+
+    const response = messages.find(
+      (
+        message,
+      ): message is Extract<
+        SessionOutboundMessage,
+        { type: "config.paseo_agent.get_catalog.response" }
+      > => message.type === "config.paseo_agent.get_catalog.response",
+    );
+    expect(response?.payload.error).toBeNull();
+    expect(response?.payload.catalog.map((entry) => entry.id)).toEqual([
+      "openrouter",
+      "chatgpt",
+      "kimi",
+      "opencode-go",
+    ]);
+    expect(JSON.stringify(response?.payload.catalog)).not.toContain("apiKey");
+    expect(JSON.stringify(response?.payload.catalog)).not.toContain("access-token");
+    expect(JSON.stringify(response?.payload.catalog)).not.toContain("refresh-token");
+  });
+
+  test("oauth.start fails clearly for an API-key provider instance", async () => {
+    const home = mkdtempSync(join(tmpdir(), "paseo-agent-session-"));
+    try {
+      writeFileSync(
+        join(home, "config.json"),
+        JSON.stringify({
+          agents: {
+            paseo: {
+              providers: {
+                "openrouter-main": {
+                  type: "openrouter",
+                  options: {
+                    apiKey: "sk-secret-openrouter",
+                    models: [{ id: "anthropic/claude-3.7-sonnet" }],
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+      const messages: SessionOutboundMessage[] = [];
+      const session = createSessionForTest({ messages, paseoHome: home });
+
+      await session.handleMessage({
+        type: "config.paseo_agent.oauth.start.request",
+        requestId: "oauth-start-api-key",
+        name: "openrouter-main",
+      });
+
+      const response = messages.find(
+        (
+          message,
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "config.paseo_agent.oauth.start.response" }
+        > => message.type === "config.paseo_agent.oauth.start.response",
+      );
+      expect(response?.payload).toMatchObject({
+        requestId: "oauth-start-api-key",
+        success: false,
+        name: "openrouter-main",
+        authorization: null,
+      });
+      expect(response?.payload.error).toContain("does not use OAuth");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test("oauth.store_credential persists a bound credential without echoing tokens", async () => {
+    const home = mkdtempSync(join(tmpdir(), "paseo-agent-session-"));
+    try {
+      writeFileSync(
+        join(home, "config.json"),
+        JSON.stringify({
+          agents: {
+            paseo: {
+              providers: {
+                subscription: {
+                  type: "chatgpt",
+                },
+              },
+            },
+          },
+        }),
+      );
+      const { manager: providerSnapshotManager, refreshSettingsSnapshot } =
+        createProviderSnapshotManagerStub();
+      const messages: SessionOutboundMessage[] = [];
+      const session = createSessionForTest({
+        messages,
+        paseoHome: home,
+        providerSnapshotManager,
+        agentManager: { updateProviderRegistry: vi.fn() },
+      });
+
+      await session.handleMessage({
+        type: "config.paseo_agent.oauth.store_credential.request",
+        requestId: "oauth-store-1",
+        name: "subscription",
+        credential: {
+          type: "oauth",
+          access: "access-token",
+          refresh: "refresh-token",
+          expires: 123,
+        },
+      });
+
+      const response = messages.find(
+        (
+          message,
+        ): message is Extract<
+          SessionOutboundMessage,
+          { type: "config.paseo_agent.oauth.store_credential.response" }
+        > => message.type === "config.paseo_agent.oauth.store_credential.response",
+      );
+      expect(response?.payload).toEqual({
+        requestId: "oauth-store-1",
+        success: true,
+        name: "subscription",
+        auth: { kind: "oauth", configured: true, source: "stored" },
+        error: null,
+      });
+      expect(JSON.stringify(response)).not.toContain("access-token");
+      expect(JSON.stringify(response)).not.toContain("refresh-token");
+      expect(refreshSettingsSnapshot).toHaveBeenCalledWith({ providers: ["paseo"] });
+
+      const stored = JSON.parse(readFileSync(join(home, "paseo-agent", "auth.json"), "utf8"));
+      expect(stored.subscription).toMatchObject({
+        type: "oauth",
+        access: "access-token",
+        refresh: "refresh-token",
+        binding: {
+          flow: "openai-codex",
+          baseUrl: "https://chatgpt.com/backend-api",
+        },
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("session provider refresh cwd routing", () => {

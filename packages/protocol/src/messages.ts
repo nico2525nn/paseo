@@ -1960,16 +1960,46 @@ const PaseoAgentOAuthCredentialSchema = z
   })
   .passthrough();
 
+const PaseoAgentCatalogModelSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1).optional(),
+    api: z.string().min(1).optional(),
+    reasoning: z.boolean().optional(),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+  })
+  .passthrough();
+
+const PaseoAgentCatalogAuthSchema = z
+  .object({
+    kind: z.string().min(1),
+  })
+  .passthrough();
+
+export const PaseoAgentCatalogEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    iconName: z.string().min(1).optional(),
+    docsUrl: z.string().optional(),
+    api: z.string().min(1),
+    baseUrl: z.string().min(1),
+    headers: z.record(z.string(), z.string()).optional(),
+    compat: z.record(z.string(), z.unknown()).optional(),
+    auth: PaseoAgentCatalogAuthSchema,
+    models: z.array(PaseoAgentCatalogModelSchema),
+  })
+  .passthrough();
+
 export const PaseoAgentProviderAuthStateSchema = z
   .object({
-    kind: z.enum(["api_key", "oauth", "none"]),
+    kind: z.string().min(1),
     configured: z.boolean(),
-    source: z
-      .enum(["literal", "env", "default_env", "command", "stored", "refresh_token"])
-      .optional(),
+    source: z.string().min(1).optional(),
     hint: z.string().optional(),
   })
-  .strict();
+  .passthrough();
 
 export const RedactedPaseoAgentProviderConfigSchema = z
   .object({
@@ -1978,14 +2008,19 @@ export const RedactedPaseoAgentProviderConfigSchema = z
     baseUrl: z.string().optional(),
     api: z.string().optional(),
     models: z.array(PaseoAgentProviderModelConfigSchema),
-    auth: PaseoAgentProviderAuthStateSchema,
+    auth: PaseoAgentProviderAuthStateSchema.optional(),
     available: z.boolean(),
     error: z.string().nullable().optional(),
   })
-  .strict();
+  .passthrough();
 
 export const PaseoAgentGetProvidersRequestSchema = z.object({
   type: z.literal("config.paseo_agent.get_providers.request"),
+  requestId: z.string(),
+});
+
+export const PaseoAgentGetCatalogRequestSchema = z.object({
+  type: z.literal("config.paseo_agent.get_catalog.request"),
   requestId: z.string(),
 });
 
@@ -2003,10 +2038,22 @@ export const PaseoAgentRemoveProviderRequestSchema = z.object({
   name: z.string().trim().min(1),
 });
 
-export const PaseoAgentStoreChatGptCredentialRequestSchema = z.object({
-  type: z.literal("config.paseo_agent.store_chatgpt_credential.request"),
+export const PaseoAgentOAuthStartRequestSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.start.request"),
   requestId: z.string(),
-  providerName: z.string().trim().min(1),
+  name: z.string().trim().min(1),
+});
+
+export const PaseoAgentOAuthCompleteRequestSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.complete.request"),
+  requestId: z.string(),
+  name: z.string().trim().min(1),
+});
+
+export const PaseoAgentOAuthStoreCredentialRequestSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.store_credential.request"),
+  requestId: z.string(),
+  name: z.string().trim().min(1),
   credential: PaseoAgentOAuthCredentialSchema,
 });
 
@@ -2162,9 +2209,12 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ListProviderModesRequestMessageSchema,
   ListProviderFeaturesRequestMessageSchema,
   PaseoAgentGetProvidersRequestSchema,
+  PaseoAgentGetCatalogRequestSchema,
   PaseoAgentSetProviderRequestSchema,
   PaseoAgentRemoveProviderRequestSchema,
-  PaseoAgentStoreChatGptCredentialRequestSchema,
+  PaseoAgentOAuthStartRequestSchema,
+  PaseoAgentOAuthCompleteRequestSchema,
+  PaseoAgentOAuthStoreCredentialRequestSchema,
   ListAvailableProvidersRequestMessageSchema,
   GetProvidersSnapshotRequestMessageSchema,
   RefreshProvidersSnapshotRequestMessageSchema,
@@ -2458,6 +2508,8 @@ export const ServerInfoStatusPayloadSchema = z
         agentForkContext: z.boolean().optional(),
         // COMPAT(paseoAgentConfig): added in v0.1.103, remove gate after 2027-01-02.
         paseoAgentConfig: z.boolean().optional(),
+        // COMPAT(paseoAgentCatalog): added in v0.1.104, drop the gate when floor >= v0.1.104
+        paseoAgentCatalog: z.boolean().optional(),
       })
       .optional(),
   })
@@ -3974,6 +4026,15 @@ export const PaseoAgentGetProvidersResponseSchema = z.object({
   }),
 });
 
+export const PaseoAgentGetCatalogResponseSchema = z.object({
+  type: z.literal("config.paseo_agent.get_catalog.response"),
+  payload: z.object({
+    requestId: z.string(),
+    catalog: z.array(PaseoAgentCatalogEntrySchema),
+    error: z.string().nullable(),
+  }),
+});
+
 export const PaseoAgentSetProviderResponseSchema = z.object({
   type: z.literal("config.paseo_agent.set_provider.response"),
   payload: z.object({
@@ -3994,13 +4055,47 @@ export const PaseoAgentRemoveProviderResponseSchema = z.object({
   }),
 });
 
-export const PaseoAgentStoreChatGptCredentialResponseSchema = z.object({
-  type: z.literal("config.paseo_agent.store_chatgpt_credential.response"),
+const PaseoAgentOAuthStartAuthorizationSchema = z
+  .object({
+    kind: z.string().min(1),
+    url: z.string().optional(),
+    instructions: z.string().optional(),
+    userCode: z.string().optional(),
+    verificationUri: z.string().optional(),
+    intervalSeconds: z.number().optional(),
+    expiresInSeconds: z.number().optional(),
+  })
+  .passthrough();
+
+export const PaseoAgentOAuthStartResponseSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.start.response"),
   payload: z.object({
     requestId: z.string(),
     success: z.boolean(),
-    providerName: z.string(),
-    auth: PaseoAgentProviderAuthStateSchema,
+    name: z.string(),
+    authorization: PaseoAgentOAuthStartAuthorizationSchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const PaseoAgentOAuthCompleteResponseSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.complete.response"),
+  payload: z.object({
+    requestId: z.string(),
+    success: z.boolean(),
+    name: z.string(),
+    auth: PaseoAgentProviderAuthStateSchema.optional(),
+    error: z.string().nullable(),
+  }),
+});
+
+export const PaseoAgentOAuthStoreCredentialResponseSchema = z.object({
+  type: z.literal("config.paseo_agent.oauth.store_credential.response"),
+  payload: z.object({
+    requestId: z.string(),
+    success: z.boolean(),
+    name: z.string(),
+    auth: PaseoAgentProviderAuthStateSchema.optional(),
     error: z.string().nullable(),
   }),
 });
@@ -4401,9 +4496,12 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ListProviderModesResponseMessageSchema,
   ListProviderFeaturesResponseMessageSchema,
   PaseoAgentGetProvidersResponseSchema,
+  PaseoAgentGetCatalogResponseSchema,
   PaseoAgentSetProviderResponseSchema,
   PaseoAgentRemoveProviderResponseSchema,
-  PaseoAgentStoreChatGptCredentialResponseSchema,
+  PaseoAgentOAuthStartResponseSchema,
+  PaseoAgentOAuthCompleteResponseSchema,
+  PaseoAgentOAuthStoreCredentialResponseSchema,
   ListAvailableProvidersResponseSchema,
   GetProvidersSnapshotResponseMessageSchema,
   ProvidersSnapshotUpdateMessageSchema,
@@ -4541,13 +4639,17 @@ export type RedactedPaseoAgentProviderConfig = z.infer<
 >;
 export type PaseoAgentProviderAuthState = z.infer<typeof PaseoAgentProviderAuthStateSchema>;
 export type PaseoAgentOAuthCredential = z.infer<typeof PaseoAgentOAuthCredentialSchema>;
+export type PaseoAgentCatalogEntry = z.infer<typeof PaseoAgentCatalogEntrySchema>;
 export type PaseoAgentGetProvidersResponse = z.infer<typeof PaseoAgentGetProvidersResponseSchema>;
+export type PaseoAgentGetCatalogResponse = z.infer<typeof PaseoAgentGetCatalogResponseSchema>;
 export type PaseoAgentSetProviderResponse = z.infer<typeof PaseoAgentSetProviderResponseSchema>;
 export type PaseoAgentRemoveProviderResponse = z.infer<
   typeof PaseoAgentRemoveProviderResponseSchema
 >;
-export type PaseoAgentStoreChatGptCredentialResponse = z.infer<
-  typeof PaseoAgentStoreChatGptCredentialResponseSchema
+export type PaseoAgentOAuthStartResponse = z.infer<typeof PaseoAgentOAuthStartResponseSchema>;
+export type PaseoAgentOAuthCompleteResponse = z.infer<typeof PaseoAgentOAuthCompleteResponseSchema>;
+export type PaseoAgentOAuthStoreCredentialResponse = z.infer<
+  typeof PaseoAgentOAuthStoreCredentialResponseSchema
 >;
 export type ListAvailableProvidersResponse = z.infer<typeof ListAvailableProvidersResponseSchema>;
 export type DaemonGetStatusResponse = z.infer<typeof DaemonGetStatusResponseSchema>;
@@ -4626,10 +4728,13 @@ export type ListProviderFeaturesRequestMessage = z.infer<
   typeof ListProviderFeaturesRequestMessageSchema
 >;
 export type PaseoAgentGetProvidersRequest = z.infer<typeof PaseoAgentGetProvidersRequestSchema>;
+export type PaseoAgentGetCatalogRequest = z.infer<typeof PaseoAgentGetCatalogRequestSchema>;
 export type PaseoAgentSetProviderRequest = z.infer<typeof PaseoAgentSetProviderRequestSchema>;
 export type PaseoAgentRemoveProviderRequest = z.infer<typeof PaseoAgentRemoveProviderRequestSchema>;
-export type PaseoAgentStoreChatGptCredentialRequest = z.infer<
-  typeof PaseoAgentStoreChatGptCredentialRequestSchema
+export type PaseoAgentOAuthStartRequest = z.infer<typeof PaseoAgentOAuthStartRequestSchema>;
+export type PaseoAgentOAuthCompleteRequest = z.infer<typeof PaseoAgentOAuthCompleteRequestSchema>;
+export type PaseoAgentOAuthStoreCredentialRequest = z.infer<
+  typeof PaseoAgentOAuthStoreCredentialRequestSchema
 >;
 export type ListAvailableProvidersRequestMessage = z.infer<
   typeof ListAvailableProvidersRequestMessageSchema

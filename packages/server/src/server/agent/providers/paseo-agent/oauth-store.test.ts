@@ -6,6 +6,8 @@ import { registerOAuthProvider, resetOAuthProviders } from "@earendil-works/pi-a
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  createBoundPaseoAgentAuthStorage,
+  getStoredOAuthCredentialState,
   hasStoredOAuthCredential,
   loginAndStoreOAuth,
   loginOAuthBrowser,
@@ -14,6 +16,7 @@ import {
 } from "./oauth-store.js";
 
 const TEST_FLOW = "paseo-test-oauth-store";
+const TEST_BASE_URL = "https://api.example.test/oauth";
 
 function registerTestOAuthProvider(): void {
   const provider: OAuthProviderInterface = {
@@ -63,6 +66,7 @@ describe("oauth-store", () => {
     const { path } = storeOAuthCredential({
       providerInstance: "chatgpt",
       env,
+      binding: { flow: TEST_FLOW, baseUrl: TEST_BASE_URL },
       credential: {
         type: "oauth",
         access: "access-token",
@@ -73,11 +77,52 @@ describe("oauth-store", () => {
     });
 
     expect(hasStoredOAuthCredential("chatgpt", env)).toBe(true);
+    expect(
+      hasStoredOAuthCredential("chatgpt", env, { flow: TEST_FLOW, baseUrl: TEST_BASE_URL }),
+    ).toBe(true);
+    expect(
+      getStoredOAuthCredentialState("chatgpt", env, {
+        flow: TEST_FLOW,
+        baseUrl: "https://api.example.test/changed",
+      }),
+    ).toEqual({ present: true, bindingMatches: false });
     const stored = JSON.parse(readFileSync(path, "utf8"));
     expect(stored.chatgpt).toMatchObject({
       type: "oauth",
       refresh: "refresh-token",
+      binding: { flow: TEST_FLOW, baseUrl: TEST_BASE_URL },
       futureField: { keep: true },
+    });
+  });
+
+  it("hides mismatched credentials from runtime auth storage without deleting them", async () => {
+    const { path } = storeOAuthCredential({
+      providerInstance: "chatgpt",
+      env,
+      binding: { flow: TEST_FLOW, baseUrl: TEST_BASE_URL },
+      credential: {
+        type: "oauth",
+        access: "access-token",
+        refresh: "refresh-token",
+        expires: 123,
+      },
+    });
+
+    const authStorage = createBoundPaseoAgentAuthStorage(
+      {
+        chatgpt: { flow: TEST_FLOW, baseUrl: "https://api.example.test/changed" },
+      },
+      env,
+    );
+
+    expect(authStorage.has("chatgpt")).toBe(false);
+    await expect(authStorage.getApiKey("chatgpt", { includeFallback: false })).resolves.toBe(
+      undefined,
+    );
+    expect(JSON.parse(readFileSync(path, "utf8")).chatgpt).toMatchObject({
+      type: "oauth",
+      refresh: "refresh-token",
+      binding: { flow: TEST_FLOW, baseUrl: TEST_BASE_URL },
     });
   });
 
@@ -87,6 +132,7 @@ describe("oauth-store", () => {
 
     const { path } = await loginAndStoreOAuth({
       flow: TEST_FLOW,
+      baseUrl: TEST_BASE_URL,
       providerInstance: "chatgpt",
       env,
       onDeviceCode: (info) => deviceCodes.push(info),
@@ -103,6 +149,7 @@ describe("oauth-store", () => {
     const login = async () => ({ refresh: "rt", access: "", expires: 0 });
     await loginAndStoreOAuth({
       flow: TEST_FLOW,
+      baseUrl: TEST_BASE_URL,
       providerInstance: "work-chatgpt",
       env,
       onDeviceCode: () => {},

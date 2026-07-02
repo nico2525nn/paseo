@@ -6,6 +6,7 @@ import { createLoginCommand } from "./index.js";
 interface RecordedLogin {
   mode: "browser" | "device";
   providerInstance?: string;
+  baseUrl?: string;
   envHome?: string | undefined;
 }
 
@@ -60,12 +61,12 @@ describe("paseo login command", () => {
             serverId: "test-daemon",
             features: { paseoAgentConfig: true },
           }),
-          storePaseoAgentChatGptCredential: async (input) => {
+          storePaseoAgentOAuthCredential: async (input) => {
             stored.push(input);
             return {
               requestId: "request-1",
               success: true,
-              providerName: input.providerName,
+              name: input.name,
               auth: { kind: "oauth", configured: true, source: "stored" },
               error: null,
             };
@@ -83,7 +84,7 @@ describe("paseo login command", () => {
     expect(recorded).toEqual([{ mode: "browser" }]);
     expect(stored).toEqual([
       {
-        providerName: "chatgpt",
+        name: "chatgpt",
         credential: {
           type: "oauth",
           access: "access-token",
@@ -121,6 +122,7 @@ describe("paseo login command", () => {
       loginDeviceCode: async (options) => {
         recorded.push({
           providerInstance: options.providerInstance,
+          baseUrl: options.baseUrl,
           envHome: options.env?.PASEO_HOME,
           mode: "device",
         });
@@ -144,7 +146,12 @@ describe("paseo login command", () => {
     ]);
 
     expect(recorded).toEqual([
-      { providerInstance: "chatgpt", envHome: "/tmp/paseo-home", mode: "device" },
+      {
+        providerInstance: "chatgpt",
+        baseUrl: "https://chatgpt.com/backend-api",
+        envHome: "/tmp/paseo-home",
+        mode: "device",
+      },
     ]);
     expect(output.join("\n")).toContain("headless device-code flow");
     expect(output.join("\n")).toContain("ABCD-EFGH");
@@ -211,7 +218,7 @@ describe("paseo login command", () => {
           serverId: "test-daemon",
           features: {},
         }),
-        storePaseoAgentChatGptCredential: async (input) => {
+        storePaseoAgentOAuthCredential: async (input) => {
           stored.push(input);
           throw new Error("store RPC should not be called without the capability flag");
         },
@@ -252,10 +259,10 @@ describe("paseo login command", () => {
           serverId: "test-daemon",
           features: { paseoAgentConfig: true },
         }),
-        storePaseoAgentChatGptCredential: async (input) => ({
+        storePaseoAgentOAuthCredential: async (input) => ({
           requestId: "request-1",
           success: true,
-          providerName: input.providerName,
+          name: input.name,
           auth: { kind: "oauth", configured: true, source: "stored" },
           error: null,
         }),

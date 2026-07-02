@@ -4,6 +4,14 @@ import { stat } from "node:fs/promises";
 import { basename, normalize, resolve, sep } from "path";
 import { homedir } from "node:os";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
+import type {
+  OAuthAuthInfo,
+  OAuthCredentials,
+  OAuthDeviceCodeInfo,
+  OAuthProviderInterface,
+  OAuthSelectPrompt,
+} from "@earendil-works/pi-ai";
+import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import {
   serializeAgentStreamEvent,
   type AgentSnapshotPayload,
@@ -18,6 +26,7 @@ import {
   type ProjectPlacementPayload,
   type WorkspaceSetupSnapshot,
   type WorkspaceDescriptorPayload,
+  type PaseoAgentOAuthCredential,
 } from "./messages.js";
 import type {
   TerminalManager,
@@ -69,6 +78,7 @@ import {
 import { AgentManager } from "./agent/agent-manager.js";
 import { ProviderSnapshotManager } from "./agent/provider-snapshot-manager.js";
 import { PaseoAgentConfigService } from "./agent/providers/paseo-agent/config-service.js";
+import type { OAuthCredentialBinding } from "./agent/providers/paseo-agent/oauth-store.js";
 import type {
   AgentManagerEvent,
   AgentTimelineCursor,
@@ -377,6 +387,126 @@ interface WorkspaceUpdatesSubscriptionState {
   lastEmittedByWorkspaceId: Map<string, WorkspaceUpdatePayload>;
 }
 
+const PASEO_AGENT_OAUTH_PENDING_TTL_MS = 15 * 60 * 1000;
+
+interface PaseoAgentOAuthStartAuthorization {
+  [key: string]: unknown;
+  kind: string;
+  url?: string;
+  instructions?: string;
+  userCode?: string;
+  verificationUri?: string;
+  intervalSeconds?: number;
+  expiresInSeconds?: number;
+}
+
+interface DeferredValue<T> {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (error: unknown) => void;
+}
+
+interface PendingPaseoAgentOAuthFlow {
+  name: string;
+  binding: OAuthCredentialBinding;
+  abortController: AbortController;
+  expiresAt: number;
+  authorizationPromise: Promise<PaseoAgentOAuthStartAuthorization | null>;
+  credentialPromise: Promise<PaseoAgentOAuthCredential>;
+}
+
+function deferredValue<T>(): DeferredValue<T> {
+  let resolveValue!: (value: T | PromiseLike<T>) => void;
+  let rejectValue!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolveValue = innerResolve;
+    rejectValue = innerReject;
+  });
+  return { promise, resolve: resolveValue, reject: rejectValue };
+}
+
+function requireOAuthProvider(flow: string): OAuthProviderInterface {
+  const provider = getOAuthProvider(flow);
+  if (!provider) {
+    throw new Error(`Paseo Agent: OAuth flow "${flow}" is not registered by Pi.`);
+  }
+  return provider;
+}
+
+function deviceCodeAuthorization(info: OAuthDeviceCodeInfo): PaseoAgentOAuthStartAuthorization {
+  return {
+    kind: "device_code",
+    userCode: info.userCode,
+    verificationUri: info.verificationUri,
+    ...(info.intervalSeconds !== undefined ? { intervalSeconds: info.intervalSeconds } : {}),
+    ...(info.expiresInSeconds !== undefined ? { expiresInSeconds: info.expiresInSeconds } : {}),
+  };
+}
+
+function authUrlAuthorization(info: OAuthAuthInfo): PaseoAgentOAuthStartAuthorization {
+  return {
+    kind: "auth_url",
+    url: info.url,
+    ...(info.instructions ? { instructions: info.instructions } : {}),
+  };
+}
+
+function selectOAuthOption(prompt: OAuthSelectPrompt): Promise<string | undefined> {
+  const preferred = prompt.options.find((option) => option.label.toLowerCase().includes("device"));
+  return Promise.resolve((preferred ?? prompt.options[0])?.id);
+}
+
+function createPendingPaseoAgentOAuthFlow(
+  name: string,
+  binding: OAuthCredentialBinding,
+): PendingPaseoAgentOAuthFlow {
+  const provider = requireOAuthProvider(binding.flow);
+  const abortController = new AbortController();
+  const authorization = deferredValue<PaseoAgentOAuthStartAuthorization | null>();
+  let authorizationSettled = false;
+
+  function settleAuthorization(value: PaseoAgentOAuthStartAuthorization | null): void {
+    if (authorizationSettled) {
+      return;
+    }
+    authorizationSettled = true;
+    authorization.resolve(value);
+  }
+
+  function rejectAuthorization(error: unknown): void {
+    if (authorizationSettled) {
+      return;
+    }
+    authorizationSettled = true;
+    authorization.reject(error);
+  }
+
+  const credentialPromise = provider
+    .login({
+      onAuth: (info) => settleAuthorization(authUrlAuthorization(info)),
+      onDeviceCode: (info) => settleAuthorization(deviceCodeAuthorization(info)),
+      onPrompt: async () => {
+        throw new Error("OAuth login requested manual input, but no prompt handler is available.");
+      },
+      onSelect: selectOAuthOption,
+      signal: abortController.signal,
+    })
+    .then((credentials: OAuthCredentials): PaseoAgentOAuthCredential => {
+      settleAuthorization(null);
+      return { type: "oauth", ...credentials };
+    });
+  void credentialPromise.catch((error) => rejectAuthorization(error));
+
+  return {
+    name,
+    binding,
+    abortController,
+    expiresAt: Date.now() + PASEO_AGENT_OAUTH_PENDING_TTL_MS,
+    authorizationPromise: authorization.promise,
+    credentialPromise,
+  };
+}
+
 class SessionRequestError extends Error {
   constructor(
     readonly code: string,
@@ -571,6 +701,7 @@ export class Session {
   private readonly terminalManager: TerminalManager | null;
   private readonly providerSnapshotManager: ProviderSnapshotManager;
   private paseoAgentConfigService: PaseoAgentConfigService | null = null;
+  private readonly pendingPaseoAgentOAuthFlows = new Map<string, PendingPaseoAgentOAuthFlow>();
   private readonly serviceProxy: ServiceProxySubsystem | null;
   private readonly scriptRuntimeStore: WorkspaceScriptRuntimeStore | null;
   private readonly getDaemonTcpPort: (() => number | null) | null;
@@ -1656,12 +1787,18 @@ export class Session {
         return this.providerCatalogSession.handleListProviderFeaturesRequest(msg);
       case "config.paseo_agent.get_providers.request":
         return this.handlePaseoAgentGetProvidersRequest(msg);
+      case "config.paseo_agent.get_catalog.request":
+        return this.handlePaseoAgentGetCatalogRequest(msg);
       case "config.paseo_agent.set_provider.request":
         return this.handlePaseoAgentSetProviderRequest(msg);
       case "config.paseo_agent.remove_provider.request":
         return this.handlePaseoAgentRemoveProviderRequest(msg);
-      case "config.paseo_agent.store_chatgpt_credential.request":
-        return this.handlePaseoAgentStoreChatGptCredentialRequest(msg);
+      case "config.paseo_agent.oauth.start.request":
+        return this.handlePaseoAgentOAuthStartRequest(msg);
+      case "config.paseo_agent.oauth.complete.request":
+        return this.handlePaseoAgentOAuthCompleteRequest(msg);
+      case "config.paseo_agent.oauth.store_credential.request":
+        return this.handlePaseoAgentOAuthStoreCredentialRequest(msg);
       case "list_available_providers_request":
         return this.providerCatalogSession.handleListAvailableProvidersRequest(msg);
       case "get_providers_snapshot_request":
@@ -1691,6 +1828,58 @@ export class Session {
 
   private async refreshPaseoAgentRuntimeSnapshot(): Promise<void> {
     await this.providerSnapshotManager.refreshSettingsSnapshot({ providers: ["paseo"] });
+  }
+
+  private deleteExpiredPaseoAgentOAuthFlows(now = Date.now()): void {
+    for (const [name, pending] of this.pendingPaseoAgentOAuthFlows) {
+      if (pending.expiresAt > now) {
+        continue;
+      }
+      pending.abortController.abort();
+      this.pendingPaseoAgentOAuthFlows.delete(name);
+    }
+  }
+
+  private replacePendingPaseoAgentOAuthFlow(pending: PendingPaseoAgentOAuthFlow): void {
+    const previous = this.pendingPaseoAgentOAuthFlows.get(pending.name);
+    previous?.abortController.abort();
+    this.pendingPaseoAgentOAuthFlows.set(pending.name, pending);
+  }
+
+  private takePendingPaseoAgentOAuthFlow(name: string): PendingPaseoAgentOAuthFlow {
+    this.deleteExpiredPaseoAgentOAuthFlows();
+    const pending = this.pendingPaseoAgentOAuthFlows.get(name);
+    if (!pending) {
+      throw new Error(`No pending OAuth flow for Paseo Agent provider '${name}'.`);
+    }
+    this.pendingPaseoAgentOAuthFlows.delete(name);
+    return pending;
+  }
+
+  private async handlePaseoAgentGetCatalogRequest(
+    msg: Extract<SessionInboundMessage, { type: "config.paseo_agent.get_catalog.request" }>,
+  ): Promise<void> {
+    try {
+      const catalog = this.createPaseoAgentConfigService().getCatalog();
+      this.emit({
+        type: "config.paseo_agent.get_catalog.response",
+        payload: {
+          requestId: msg.requestId,
+          catalog,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error({ err: error }, "Failed to read Paseo Agent catalog");
+      this.emit({
+        type: "config.paseo_agent.get_catalog.response",
+        payload: {
+          requestId: msg.requestId,
+          catalog: [],
+          error: getErrorMessage(error),
+        },
+      });
+    }
   }
 
   private async handlePaseoAgentGetProvidersRequest(
@@ -1789,36 +1978,117 @@ export class Session {
     }
   }
 
-  private async handlePaseoAgentStoreChatGptCredentialRequest(
-    msg: Extract<
-      SessionInboundMessage,
-      { type: "config.paseo_agent.store_chatgpt_credential.request" }
-    >,
+  private async handlePaseoAgentOAuthStartRequest(
+    msg: Extract<SessionInboundMessage, { type: "config.paseo_agent.oauth.start.request" }>,
   ): Promise<void> {
     try {
-      this.createPaseoAgentConfigService().storeOAuthCredential(msg.providerName, msg.credential);
-      await this.refreshPaseoAgentRuntimeSnapshot();
+      this.deleteExpiredPaseoAgentOAuthFlows();
+      const binding = this.createPaseoAgentConfigService().getOAuthCredentialBinding(msg.name);
+      const pending = createPendingPaseoAgentOAuthFlow(msg.name, binding);
+      this.replacePendingPaseoAgentOAuthFlow(pending);
+      const authorization = await pending.authorizationPromise;
       this.emit({
-        type: "config.paseo_agent.store_chatgpt_credential.response",
+        type: "config.paseo_agent.oauth.start.response",
         payload: {
           requestId: msg.requestId,
           success: true,
-          providerName: msg.providerName,
-          auth: { kind: "oauth", configured: true, source: "stored" },
+          name: msg.name,
+          authorization,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.pendingPaseoAgentOAuthFlows.delete(msg.name);
+      this.sessionLogger.error(
+        { err: error, providerName: msg.name },
+        "Failed to start Paseo Agent OAuth flow",
+      );
+      this.emit({
+        type: "config.paseo_agent.oauth.start.response",
+        payload: {
+          requestId: msg.requestId,
+          success: false,
+          name: msg.name,
+          authorization: null,
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async handlePaseoAgentOAuthCompleteRequest(
+    msg: Extract<SessionInboundMessage, { type: "config.paseo_agent.oauth.complete.request" }>,
+  ): Promise<void> {
+    try {
+      const pending = this.takePendingPaseoAgentOAuthFlow(msg.name);
+      const credential = await pending.credentialPromise;
+      const auth = this.createPaseoAgentConfigService().storeOAuthCredential(
+        msg.name,
+        credential,
+        pending.binding,
+      );
+      await this.refreshPaseoAgentRuntimeSnapshot();
+      this.emit({
+        type: "config.paseo_agent.oauth.complete.response",
+        payload: {
+          requestId: msg.requestId,
+          success: true,
+          name: msg.name,
+          auth,
           error: null,
         },
       });
     } catch (error) {
       this.sessionLogger.error(
-        { err: error, providerName: msg.providerName },
-        "Failed to store Paseo Agent OAuth credential",
+        { err: error, providerName: msg.name },
+        "Failed to complete Paseo Agent OAuth flow",
       );
       this.emit({
-        type: "config.paseo_agent.store_chatgpt_credential.response",
+        type: "config.paseo_agent.oauth.complete.response",
         payload: {
           requestId: msg.requestId,
           success: false,
-          providerName: msg.providerName,
+          name: msg.name,
+          auth: { kind: "oauth", configured: false },
+          error: getErrorMessage(error),
+        },
+      });
+    }
+  }
+
+  private async handlePaseoAgentOAuthStoreCredentialRequest(
+    msg: Extract<
+      SessionInboundMessage,
+      { type: "config.paseo_agent.oauth.store_credential.request" }
+    >,
+  ): Promise<void> {
+    try {
+      const auth = this.createPaseoAgentConfigService().storeOAuthCredential(
+        msg.name,
+        msg.credential,
+      );
+      await this.refreshPaseoAgentRuntimeSnapshot();
+      this.emit({
+        type: "config.paseo_agent.oauth.store_credential.response",
+        payload: {
+          requestId: msg.requestId,
+          success: true,
+          name: msg.name,
+          auth,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.sessionLogger.error(
+        { err: error, providerName: msg.name },
+        "Failed to store Paseo Agent OAuth credential",
+      );
+      this.emit({
+        type: "config.paseo_agent.oauth.store_credential.response",
+        payload: {
+          requestId: msg.requestId,
+          success: false,
+          name: msg.name,
           auth: { kind: "oauth", configured: false },
           error: getErrorMessage(error),
         },
@@ -5826,6 +6096,11 @@ export class Session {
    */
   public async cleanup(): Promise<void> {
     this.sessionLogger.trace({}, "agent.session.lifecycle.cleanup");
+
+    for (const pending of this.pendingPaseoAgentOAuthFlows.values()) {
+      pending.abortController.abort();
+    }
+    this.pendingPaseoAgentOAuthFlows.clear();
 
     if (this.unsubscribeAgentEvents) {
       this.unsubscribeAgentEvents();

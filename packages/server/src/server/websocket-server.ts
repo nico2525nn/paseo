@@ -1227,6 +1227,8 @@ export class VoiceAssistantWebSocketServer {
         agentForkContext: true,
         // COMPAT(paseoAgentConfig): added in v0.1.103, remove gate after 2027-01-02.
         paseoAgentConfig: true,
+        // COMPAT(paseoAgentCatalog): added in v0.1.104, drop the gate when floor >= v0.1.104
+        paseoAgentCatalog: true,
       },
     };
   }
@@ -2335,7 +2337,7 @@ function redactPaseoAgentConfigSecrets(payload: unknown): unknown {
     };
   }
 
-  if (message.type === "config.paseo_agent.store_chatgpt_credential.request") {
+  if (message.type === "config.paseo_agent.oauth.store_credential.request") {
     return {
       ...record,
       message: {
