@@ -587,8 +587,8 @@ describe("PersistedConfigSchema logging config", () => {
     expect(parsed.log?.format).toBe("json");
   });
 
-  test("rejects unknown logging config fields", () => {
-    const result = PersistedConfigSchema.safeParse({
+  test("strips unknown logging config fields", () => {
+    const parsed = PersistedConfigSchema.parse({
       log: {
         console: {
           level: "info",
@@ -597,7 +597,7 @@ describe("PersistedConfigSchema logging config", () => {
       },
     });
 
-    expect(result.success).toBe(false);
+    expect(parsed.log?.console).toEqual({ level: "info" });
   });
 });
 

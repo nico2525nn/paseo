@@ -195,9 +195,8 @@ Single file, validated with `PersistedConfigSchema`.
 
 All fields are optional with sensible defaults.
 
-Config loading strips unrecognized object keys before validation so a config written by a newer
-daemon does not brick older read paths such as `paseo daemon status`. Malformed known fields still
-fail validation, and saving remains strict.
+Config parsing strips unrecognized object keys so a config written by a newer daemon does not brick
+older read paths such as `paseo daemon status`. Malformed known fields still fail validation.
 
 `agents.metadataGeneration.providers` controls the preferred structured-generation fallback order for daemon-side metadata tasks such as commit messages, PR text, branch names, and generated agent titles. Entries are tried first in the configured order, then Paseo falls through to dynamically discovered defaults and finally the current selection when available.
 
