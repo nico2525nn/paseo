@@ -138,27 +138,27 @@ function deriveDesktopManagedFromPidLock(lock: Record<string, unknown>): boolean
   return lock.desktopManaged === true;
 }
 
-function readDesktopManagedFromPidLock(): boolean {
+function readPidLockRecord(): Record<string, unknown> | null {
   try {
     const raw = readFileSync(path.join(getPaseoHome(), "paseo.pid"), "utf-8");
     const lock = JSON.parse(raw) as unknown;
-    return isRecord(lock) && deriveDesktopManagedFromPidLock(lock);
+    return isRecord(lock) ? lock : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
+function readDesktopManagedFromPidLock(): boolean {
+  const lock = readPidLockRecord();
+  return lock !== null && deriveDesktopManagedFromPidLock(lock);
+}
+
 export function isDesktopManagedDaemonRunningSync(): boolean {
-  try {
-    const raw = readFileSync(path.join(getPaseoHome(), "paseo.pid"), "utf-8");
-    const lock = JSON.parse(raw) as unknown;
-    if (!isRecord(lock)) return false;
-    if (!deriveDesktopManagedFromPidLock(lock)) return false;
-    if (typeof lock.pid !== "number" || !Number.isInteger(lock.pid)) return false;
-    return isProcessRunning(lock.pid);
-  } catch {
-    return false;
-  }
+  const lock = readPidLockRecord();
+  if (lock === null) return false;
+  if (!deriveDesktopManagedFromPidLock(lock)) return false;
+  if (typeof lock.pid !== "number" || !Number.isInteger(lock.pid)) return false;
+  return isProcessRunning(lock.pid);
 }
 
 function summarizeDesktopDaemonStatus(status: DesktopDaemonStatus): Record<string, unknown> {
