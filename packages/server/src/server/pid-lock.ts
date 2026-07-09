@@ -37,6 +37,7 @@ export class PidLockError extends Error {
 
 const PROCESS_START_SKEW_TOLERANCE_MS = 60_000;
 const PROCESS_LOCK_ACQUIRE_TOLERANCE_MS = 5 * 60_000;
+const POSIX_PROCESS_TIME_ENV = { ...process.env, LC_ALL: "C", LANG: "C" };
 let cachedClockTicksPerSecond: number | null = null;
 
 function isPidRunning(pid: number): boolean {
@@ -96,6 +97,7 @@ function readPsProcessStartedAtMs(pid: number): number | null {
   try {
     const output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
       encoding: "utf8",
+      env: POSIX_PROCESS_TIME_ENV,
       timeout: 1000,
     }).trim();
     const parsed = Date.parse(output);

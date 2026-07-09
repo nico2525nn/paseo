@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -55,7 +55,6 @@ describe("pid-lock ownership", () => {
     const replacementOwnerPid = process.pid + 10_000;
 
     try {
-      await mkdir(paseoHome, { recursive: true });
       await writeFile(
         join(paseoHome, "paseo.pid"),
         JSON.stringify({
