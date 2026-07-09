@@ -1,5 +1,6 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { open, readFile, unlink, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { hostname } from "node:os";
 import { z } from "zod";
@@ -34,6 +35,10 @@ export class PidLockError extends Error {
   }
 }
 
+const PROCESS_START_SKEW_TOLERANCE_MS = 60_000;
+const PROCESS_LOCK_ACQUIRE_TOLERANCE_MS = 5 * 60_000;
+let cachedClockTicksPerSecond: number | null = null;
+
 function isPidRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -41,6 +46,125 @@ function isPidRunning(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+function readClockTicksPerSecond(): number {
+  if (cachedClockTicksPerSecond !== null) {
+    return cachedClockTicksPerSecond;
+  }
+
+  try {
+    const output = execFileSync("getconf", ["CLK_TCK"], {
+      encoding: "utf8",
+      timeout: 1000,
+    }).trim();
+    const value = Number(output);
+    cachedClockTicksPerSecond = Number.isFinite(value) && value > 0 ? value : 100;
+  } catch {
+    cachedClockTicksPerSecond = 100;
+  }
+
+  return cachedClockTicksPerSecond;
+}
+
+function readLinuxProcessStartedAtMs(pid: number): number | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closeParen = stat.lastIndexOf(")");
+    if (closeParen === -1) return null;
+
+    const fieldsAfterCommand = stat
+      .slice(closeParen + 2)
+      .trim()
+      .split(/\s+/);
+    const startTicks = Number(fieldsAfterCommand[19]);
+    if (!Number.isFinite(startTicks)) return null;
+
+    const bootTimeLine = readFileSync("/proc/stat", "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("btime "));
+    const bootSeconds = Number(bootTimeLine?.trim().split(/\s+/)[1]);
+    if (!Number.isFinite(bootSeconds)) return null;
+
+    return bootSeconds * 1000 + (startTicks / readClockTicksPerSecond()) * 1000;
+  } catch {
+    return null;
+  }
+}
+
+function readPsProcessStartedAtMs(pid: number): number | null {
+  try {
+    const output = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      encoding: "utf8",
+      timeout: 1000,
+    }).trim();
+    const parsed = Date.parse(output);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readWindowsProcessStartedAtMs(pid: number): number | null {
+  try {
+    const command = [
+      `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"`,
+      'if ($p) { $p.CreationDate.ToUniversalTime().ToString("o") }',
+    ].join("; ");
+    const output = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", command],
+      {
+        encoding: "utf8",
+        timeout: 3000,
+      },
+    ).trim();
+    const parsed = Date.parse(output);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function readProcessStartedAtMs(pid: number): number | null {
+  if (process.platform === "linux") {
+    return readLinuxProcessStartedAtMs(pid) ?? readPsProcessStartedAtMs(pid);
+  }
+  if (process.platform === "win32") {
+    return readWindowsProcessStartedAtMs(pid);
+  }
+  return readPsProcessStartedAtMs(pid);
+}
+
+function lockMatchesLiveProcessIdentity(lock: PidLockInfo): boolean {
+  const lockStartedAtMs = Date.parse(lock.startedAt);
+  if (!Number.isFinite(lockStartedAtMs)) {
+    return false;
+  }
+
+  const processStartedAtMs = readProcessStartedAtMs(lock.pid);
+  if (processStartedAtMs === null) {
+    return true;
+  }
+
+  if (processStartedAtMs - lockStartedAtMs > PROCESS_START_SKEW_TOLERANCE_MS) {
+    return false;
+  }
+  if (lockStartedAtMs - processStartedAtMs > PROCESS_LOCK_ACQUIRE_TOLERANCE_MS) {
+    return false;
+  }
+
+  return true;
+}
+
+function isPidLockOwnerRunning(lock: PidLockInfo): boolean {
+  if (!isPidRunning(lock.pid)) {
+    return false;
+  }
+
+  // PIDs can be reused after an unclean daemon exit. Treat a live PID as the
+  // lock owner only when its process start time still lines up with the lock.
+  return lockMatchesLiveProcessIdentity(lock);
 }
 
 function getPidFilePath(paseoHome: string): string {
@@ -78,7 +202,7 @@ export async function acquirePidLock(
   // Check if existing lock is stale
   const lockOwnerPid = resolveOwnerPid(options?.ownerPid);
   if (existingLock) {
-    if (isPidRunning(existingLock.pid)) {
+    if (isPidLockOwnerRunning(existingLock)) {
       if (existingLock.pid === lockOwnerPid) {
         return;
       }
@@ -197,7 +321,7 @@ export async function isLocked(
   if (!info) {
     return { locked: false };
   }
-  if (!isPidRunning(info.pid)) {
+  if (!isPidLockOwnerRunning(info)) {
     return { locked: false, info };
   }
   return { locked: true, info };
