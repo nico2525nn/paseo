@@ -1447,7 +1447,7 @@ export async function createPaseoDaemon(
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
     await closeAllAgents(logger, agentManager);
-    await agentManager.flush().catch(() => undefined);
+    await agentManager.flushForShutdown().catch(() => undefined);
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     await providerSnapshotManager.shutdown();

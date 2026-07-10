@@ -542,6 +542,7 @@ export class AgentManager {
   private readonly durableTimelineStore?: AgentTimelineStore;
   private readonly previousStatuses = new Map<string, AgentLifecycleStatus>();
   private readonly backgroundTasks = new Set<Promise<void>>();
+  private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
   private mcpBaseUrl: string | null;
   private readonly mcpAuthToken: string | null;
@@ -934,7 +935,15 @@ export class AgentManager {
     return this.timelineStore.fetch(id, options);
   }
 
-  async createAgent(
+  createAgent(
+    config: AgentSessionConfig,
+    agentId: string | undefined,
+    options: CreateAgentOptions,
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(this.createAgentInternal(config, agentId, options));
+  }
+
+  private async createAgentInternal(
     config: AgentSessionConfig,
     agentId: string | undefined,
     options: CreateAgentOptions,
@@ -967,7 +976,24 @@ export class AgentManager {
 
   // Reconstruct an agent from provider persistence. Callers should explicitly
   // hydrate timeline history after resume.
-  async resumeAgentFromPersistence(
+  resumeAgentFromPersistence(
+    handle: AgentPersistenceHandle,
+    overrides?: Partial<AgentSessionConfig>,
+    agentId?: string,
+    options?: {
+      createdAt?: Date;
+      updatedAt?: Date;
+      lastUserMessageAt?: Date | null;
+      labels?: Record<string, string>;
+      workspaceId?: string;
+    },
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(
+      this.resumeAgentFromPersistenceInternal(handle, overrides, agentId, options),
+    );
+  }
+
+  private async resumeAgentFromPersistenceInternal(
     handle: AgentPersistenceHandle,
     overrides?: Partial<AgentSessionConfig>,
     agentId?: string,
@@ -1008,7 +1034,17 @@ export class AgentManager {
     return this.registerSession(session, storedConfig, resolvedAgentId, options);
   }
 
-  async importProviderSession(input: {
+  importProviderSession(input: {
+    provider: AgentProvider;
+    providerHandleId: string;
+    cwd: string;
+    workspaceId: string;
+    labels?: Record<string, string>;
+  }): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(this.importProviderSessionInternal(input));
+  }
+
+  private async importProviderSessionInternal(input: {
     provider: AgentProvider;
     providerHandleId: string;
     cwd: string;
@@ -1040,20 +1076,30 @@ export class AgentManager {
       },
       { config: providerLaunchConfig, storedConfig, launchContext },
     );
-    const importedConfig = await this.normalizeConfig(stripInternalPaseoMcpServer(imported.config));
-    const timelineRows = buildImportedTimelineRows(imported.timeline);
-    const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
+    let handedToRegistration = false;
+    try {
+      const importedConfig = await this.normalizeConfig(
+        stripInternalPaseoMcpServer(imported.config),
+      );
+      const timelineRows = buildImportedTimelineRows(imported.timeline);
+      const initialTitle = resolveImportedAgentTitle(importedConfig, timelineRows);
 
-    return this.registerSession(imported.session, importedConfig, resolvedAgentId, {
-      labels: input.labels,
-      workspaceId: input.workspaceId,
-      timelineRows,
-      timelineNextSeq: timelineRows.length + 1,
-      persistence: imported.persistence,
-      historyPrimed: true,
-      initialTitle,
-      publishWhenReady: true,
-    });
+      handedToRegistration = true;
+      return this.registerSession(imported.session, importedConfig, resolvedAgentId, {
+        labels: input.labels,
+        workspaceId: input.workspaceId,
+        timelineRows,
+        timelineNextSeq: timelineRows.length + 1,
+        persistence: imported.persistence,
+        historyPrimed: true,
+        initialTitle,
+        publishWhenReady: true,
+      });
+    } finally {
+      if (!handedToRegistration) {
+        await this.closeUnregisteredSession(imported.session);
+      }
+    }
   }
 
   // Hot-reload an active agent session with config overrides. By default the
@@ -1062,7 +1108,17 @@ export class AgentManager {
   // new epoch is minted and provider history is re-streamed — this is what the
   // user-facing "Reload agent" action wants when the on-disk session was
   // mutated outside Paseo.
-  async reloadAgentSession(
+  reloadAgentSession(
+    agentId: string,
+    overrides?: Partial<AgentSessionConfig>,
+    options?: { rehydrateFromDisk?: boolean },
+  ): Promise<ManagedAgent> {
+    return this.trackAgentRegistrationOperation(
+      this.reloadAgentSessionInternal(agentId, overrides, options),
+    );
+  }
+
+  private async reloadAgentSessionInternal(
     agentId: string,
     overrides?: Partial<AgentSessionConfig>,
     options?: { rehydrateFromDisk?: boolean },
@@ -1094,36 +1150,43 @@ export class AgentManager {
       ? await client.resumeSession(handle, providerLaunchConfig, launchContext)
       : await client.createSession(providerLaunchConfig, launchContext);
 
-    this.agentStreamCoalescer.flushAndDiscard(agentId);
-    // Remove the existing agent entry before swapping sessions
-    this.agents.delete(agentId);
-    if (existing.unsubscribeSession) {
-      existing.unsubscribeSession();
-      existing.unsubscribeSession = null;
-    }
-    this.foregroundRuns.clearAgent(agentId, existing);
-    await this.closeReloadedSession(existing.session, agentId);
+    let handedToRegistration = false;
+    try {
+      this.assertAcceptingAgentRegistrations();
 
-    if (rehydrateFromDisk) {
-      // Wipe both durable and in-memory timeline so registerSession mints a
-      // new epoch and hydrateTimelineFromProvider re-streams the freshly read
-      // provider history into an empty timeline.
-      await this.deleteCommittedTimeline(agentId);
-      this.timelineStore.delete(agentId);
-    }
+      const closedExisting = this.prepareAgentForClosure(existing, "agent reloaded");
+      try {
+        await this.persistSnapshot(closedExisting);
+      } finally {
+        await this.closeReloadedSession(existing.session, agentId);
+      }
 
-    // Preserve existing labels and timeline during reload.
-    return this.registerSession(session, storedConfig, agentId, {
-      labels: existing.labels,
-      workspaceId: existing.workspaceId,
-      createdAt: existing.createdAt,
-      updatedAt: existing.updatedAt,
-      lastUserMessageAt: existing.lastUserMessageAt,
-      historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
-      lastUsage: preservedLastUsage,
-      lastError: preservedLastError,
-      attention: preservedAttention,
-    });
+      if (rehydrateFromDisk) {
+        // Wipe both durable and in-memory timeline so registerSession mints a
+        // new epoch and hydrateTimelineFromProvider re-streams the freshly read
+        // provider history into an empty timeline.
+        await this.deleteCommittedTimeline(agentId);
+        this.timelineStore.delete(agentId);
+      }
+
+      // Preserve existing labels and timeline during reload.
+      handedToRegistration = true;
+      return this.registerSession(session, storedConfig, agentId, {
+        labels: existing.labels,
+        workspaceId: existing.workspaceId,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+        lastUserMessageAt: existing.lastUserMessageAt,
+        historyPrimed: rehydrateFromDisk ? false : preservedHistoryPrimed,
+        lastUsage: preservedLastUsage,
+        lastError: preservedLastError,
+        attention: preservedAttention,
+      });
+    } finally {
+      if (!handedToRegistration) {
+        await this.closeUnregisteredSession(session);
+      }
+    }
   }
 
   private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
@@ -2490,55 +2553,64 @@ export class AgentManager {
       workspaceId?: string;
     },
   ): Promise<ManagedAgent> {
-    this.rejectSessionRegistrationDuringShutdown(session);
-    const resolvedAgentId = validateAgentId(agentId, "registerSession");
-    if (this.agents.has(resolvedAgentId)) {
-      throw new Error(`Agent with id ${resolvedAgentId} already exists`);
-    }
-    const initialPersistedTitle = await this.resolveInitialPersistedTitle(
-      resolvedAgentId,
-      config,
-      options?.initialTitle ?? null,
-    );
+    let registered = false;
+    try {
+      this.assertAcceptingAgentRegistrations();
+      const resolvedAgentId = validateAgentId(agentId, "registerSession");
+      if (this.agents.has(resolvedAgentId)) {
+        throw new Error(`Agent with id ${resolvedAgentId} already exists`);
+      }
+      const initialPersistedTitle = await this.resolveInitialPersistedTitle(
+        resolvedAgentId,
+        config,
+        options?.initialTitle ?? null,
+      );
 
-    const now = new Date();
-    const { durableTimelineHasRows } = await this.initializeAgentTimelineForRegister({
-      agentId: resolvedAgentId,
-      now,
-      options,
-    });
+      const now = new Date();
+      const { durableTimelineHasRows } = await this.initializeAgentTimelineForRegister({
+        agentId: resolvedAgentId,
+        now,
+        options,
+      });
 
-    const managed = this.buildManagedAgentForRegister({
-      resolvedAgentId,
-      session,
-      config,
-      now,
-      durableTimelineHasRows,
-      options,
-    });
+      const managed = this.buildManagedAgentForRegister({
+        resolvedAgentId,
+        session,
+        config,
+        now,
+        durableTimelineHasRows,
+        options,
+      });
 
-    this.rejectSessionRegistrationDuringShutdown(session);
-    this.agents.set(resolvedAgentId, managed);
-    // Initialize previousStatus to track transitions
-    this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
-    await this.refreshRuntimeInfo(managed, { emit: false });
-    this.assertAgentRegistrationActive(managed);
-    await this.persistSnapshot(managed, {
-      title: initialPersistedTitle,
-    });
-    this.assertAgentRegistrationActive(managed);
-    if (!options?.publishWhenReady) {
+      this.assertAcceptingAgentRegistrations();
+      this.agents.set(resolvedAgentId, managed);
+      registered = true;
+      // Initialize previousStatus to track transitions
+      this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
+      await this.refreshRuntimeInfo(managed, { emit: false });
+      this.assertAgentRegistrationActive(managed);
+      await this.persistSnapshot(managed, {
+        title: initialPersistedTitle,
+      });
+      this.assertAgentRegistrationActive(managed);
+      if (!options?.publishWhenReady) {
+        this.emitState(managed, { persist: false });
+      }
+
+      await this.refreshSessionState(managed, { emit: false });
+      this.assertAgentRegistrationActive(managed);
+      managed.lifecycle = "idle";
+      await this.persistSnapshot(managed);
+      this.assertAgentRegistrationActive(managed);
       this.emitState(managed, { persist: false });
+      this.subscribeToSession(managed);
+      return { ...managed };
+    } catch (error) {
+      if (!registered) {
+        await this.closeUnregisteredSession(session);
+      }
+      throw error;
     }
-
-    await this.refreshSessionState(managed, { emit: false });
-    this.assertAgentRegistrationActive(managed);
-    managed.lifecycle = "idle";
-    await this.persistSnapshot(managed);
-    this.assertAgentRegistrationActive(managed);
-    this.emitState(managed, { persist: false });
-    this.subscribeToSession(managed);
-    return { ...managed };
   }
 
   private assertAcceptingAgentRegistrations(): void {
@@ -2553,18 +2625,12 @@ export class AgentManager {
     }
   }
 
-  private rejectSessionRegistrationDuringShutdown(session: AgentSession): void {
-    if (this.acceptingAgentRegistrations) {
-      return;
-    }
+  private async closeUnregisteredSession(session: AgentSession): Promise<void> {
     try {
-      void session.close().catch((error) => {
-        this.logger.warn({ err: error }, "Failed to close unregistered session during shutdown");
-      });
+      await session.close();
     } catch (error) {
-      this.logger.warn({ err: error }, "Failed to close unregistered session during shutdown");
+      this.logger.warn({ err: error }, "Failed to close unregistered agent session");
     }
-    throw new AgentManagerShuttingDownError();
   }
 
   private async initializeAgentTimelineForRegister(params: {
@@ -3613,15 +3679,45 @@ export class AgentManager {
     });
   }
 
+  private trackAgentRegistrationOperation<T>(result: Promise<T>): Promise<T> {
+    const settled = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.agentRegistrationTasks.add(settled);
+    void settled.then(() => {
+      this.agentRegistrationTasks.delete(settled);
+      return undefined;
+    });
+    return result;
+  }
+
   /**
    * Flush any background persistence work (best-effort).
-   * Used by daemon shutdown paths to avoid unhandled rejections after cleanup.
    */
   async flush(): Promise<void> {
+    await this.flushTasks({ includeAgentRegistrations: false });
+  }
+
+  /**
+   * Flush persistence and agent registrations that crossed the synchronous
+   * shutdown barrier. Those registrations own provider sessions until they
+   * either install them or close them.
+   */
+  async flushForShutdown(): Promise<void> {
+    await this.flushTasks({ includeAgentRegistrations: true });
+  }
+
+  private async flushTasks(options: { includeAgentRegistrations: boolean }): Promise<void> {
     this.agentStreamCoalescer.flushAll();
     // Drain tasks, including tasks spawned while awaiting.
-    while (this.backgroundTasks.size > 0) {
-      const pending = Array.from(this.backgroundTasks);
+    while (
+      this.backgroundTasks.size > 0 ||
+      (options.includeAgentRegistrations && this.agentRegistrationTasks.size > 0)
+    ) {
+      const pending = options.includeAgentRegistrations
+        ? [...this.backgroundTasks, ...this.agentRegistrationTasks]
+        : [...this.backgroundTasks];
       await Promise.allSettled(pending);
     }
   }
