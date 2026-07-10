@@ -82,6 +82,13 @@ const STORED_AGENT_CAPABILITIES: AgentCapabilityFlags = {
 
 type TimeoutResult = "completed" | "timed_out";
 
+export class AgentManagerShuttingDownError extends Error {
+  constructor() {
+    super("Agent manager is shutting down");
+    this.name = "AgentManagerShuttingDownError";
+  }
+}
+
 interface PreparedSessionConfig {
   storedConfig: AgentSessionConfig;
   launchConfig: AgentSessionConfig;
@@ -546,6 +553,7 @@ export class AgentManager {
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   private logger: Logger;
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
+  private acceptingAgentRegistrations = true;
 
   constructor(options: AgentManagerOptions) {
     this.idFactory = options?.idFactory ?? (() => randomUUID());
@@ -617,6 +625,10 @@ export class AgentManager {
 
   setMcpBaseUrl(url: string | null): void {
     this.mcpBaseUrl = url;
+  }
+
+  prepareForShutdown(): void {
+    this.acceptingAgentRegistrations = false;
   }
 
   setPaseoToolsEnabled(enabled: boolean): void {
@@ -927,6 +939,7 @@ export class AgentManager {
     agentId: string | undefined,
     options: CreateAgentOptions,
   ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(agentId ?? this.idFactory(), "createAgent");
     const { storedConfig, launchConfig } = await this.prepareSessionConfig(config, resolvedAgentId);
     this.requireEnabledProvider(storedConfig.provider);
@@ -966,6 +979,7 @@ export class AgentManager {
       workspaceId?: string;
     },
   ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(
       agentId ?? this.idFactory(),
       "resumeAgentFromPersistence",
@@ -1001,6 +1015,7 @@ export class AgentManager {
     workspaceId: string;
     labels?: Record<string, string>;
   }): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(this.idFactory(), "importProviderSession");
     this.requireEnabledProvider(input.provider);
 
@@ -1052,6 +1067,7 @@ export class AgentManager {
     overrides?: Partial<AgentSessionConfig>,
     options?: { rehydrateFromDisk?: boolean },
   ): Promise<ManagedAgent> {
+    this.assertAcceptingAgentRegistrations();
     let existing = this.requireSessionAgent(agentId);
     if (this.hasInFlightRun(agentId)) {
       await this.cancelAgentRun(agentId);
@@ -2474,6 +2490,7 @@ export class AgentManager {
       workspaceId?: string;
     },
   ): Promise<ManagedAgent> {
+    this.rejectSessionRegistrationDuringShutdown(session);
     const resolvedAgentId = validateAgentId(agentId, "registerSession");
     if (this.agents.has(resolvedAgentId)) {
       throw new Error(`Agent with id ${resolvedAgentId} already exists`);
@@ -2500,23 +2517,54 @@ export class AgentManager {
       options,
     });
 
+    this.rejectSessionRegistrationDuringShutdown(session);
     this.agents.set(resolvedAgentId, managed);
     // Initialize previousStatus to track transitions
     this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
-    await this.refreshRuntimeInfo(managed, { emit: !options?.publishWhenReady });
+    await this.refreshRuntimeInfo(managed, { emit: false });
+    this.assertAgentRegistrationActive(managed);
     await this.persistSnapshot(managed, {
       title: initialPersistedTitle,
     });
+    this.assertAgentRegistrationActive(managed);
     if (!options?.publishWhenReady) {
       this.emitState(managed, { persist: false });
     }
 
-    await this.refreshSessionState(managed, { emit: !options?.publishWhenReady });
+    await this.refreshSessionState(managed, { emit: false });
+    this.assertAgentRegistrationActive(managed);
     managed.lifecycle = "idle";
     await this.persistSnapshot(managed);
+    this.assertAgentRegistrationActive(managed);
     this.emitState(managed, { persist: false });
     this.subscribeToSession(managed);
     return { ...managed };
+  }
+
+  private assertAcceptingAgentRegistrations(): void {
+    if (!this.acceptingAgentRegistrations) {
+      throw new AgentManagerShuttingDownError();
+    }
+  }
+
+  private assertAgentRegistrationActive(agent: ActiveManagedAgent): void {
+    if (!this.acceptingAgentRegistrations || this.agents.get(agent.id) !== agent) {
+      throw new AgentManagerShuttingDownError();
+    }
+  }
+
+  private rejectSessionRegistrationDuringShutdown(session: AgentSession): void {
+    if (this.acceptingAgentRegistrations) {
+      return;
+    }
+    try {
+      void session.close().catch((error) => {
+        this.logger.warn({ err: error }, "Failed to close unregistered session during shutdown");
+      });
+    } catch (error) {
+      this.logger.warn({ err: error }, "Failed to close unregistered session during shutdown");
+    }
+    throw new AgentManagerShuttingDownError();
   }
 
   private async initializeAgentTimelineForRegister(params: {
