@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import type { BrowserKeyboardPolicy } from "./features/browser-keyboard/index.js";
 
 type EventHandler = (payload: unknown) => void;
 
@@ -74,6 +75,8 @@ contextBridge.exposeInMainWorld("paseoDesktop", {
       ipcRenderer.invoke("paseo:menu:showContextMenu", input),
   },
   browser: {
+    setShortcutPolicy: (input: BrowserKeyboardPolicy) =>
+      ipcRenderer.invoke("paseo:browser:set-shortcut-policy", input),
     registerWorkspaceBrowser: (input: { browserId: string; workspaceId: string }) =>
       ipcRenderer.invoke("paseo:browser:register-workspace-browser", input),
     unregisterWorkspaceBrowser: (browserId: string) =>

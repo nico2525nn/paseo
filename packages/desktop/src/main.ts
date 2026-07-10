@@ -74,6 +74,7 @@ import {
 import { runDesktopStartup } from "./desktop-startup.js";
 import { autoUpdateInstalledSkills } from "./integrations/skills/index.js";
 import { registerBrowserAutomationIpc } from "./features/browser-automation/ipc.js";
+import { BrowserKeyboard } from "./features/browser-keyboard/index.js";
 
 const DEV_SERVER_URL = process.env.EXPO_DEV_URL ?? "http://localhost:8081";
 const APP_SCHEME = "paseo";
@@ -81,35 +82,6 @@ const PASEO_DEBUG = process.env.PASEO_DEBUG === "1";
 const DISABLE_SINGLE_INSTANCE_LOCK = process.env.PASEO_DISABLE_SINGLE_INSTANCE_LOCK === "1";
 const APP_NAME = process.env.PASEO_TEST_APP_NAME?.trim() || "Paseo";
 
-const BROWSER_SHORTCUT_EVENT = "paseo:event:browser-shortcut";
-const BROWSER_FORWARDED_KEY_EVENT = "paseo:event:browser-forwarded-key";
-
-const FORWARDED_PASEO_SHORTCUT_KEYS = new Set([
-  "b",
-  "e",
-  "w",
-  "t",
-  "k",
-  "o",
-  "/",
-  "\\",
-  ",",
-  ".",
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "enter",
-  "arrowleft",
-  "arrowright",
-  "arrowup",
-  "arrowdown",
-]);
 const DESKTOP_SMOKE_ENV = "PASEO_DESKTOP_SMOKE";
 const DESKTOP_SMOKE_STOP_REQUEST = "paseo-smoke-stop";
 app.setName(APP_NAME);
@@ -144,31 +116,9 @@ function readActiveBrowserInput(
   return { workspaceId: record.workspaceId.trim(), browserId: browserId || null };
 }
 
-const pendingBrowserWebviewIds: string[] = [];
-
-function isBrowserRefreshInput(input: Electron.Input): boolean {
-  if (input.type !== "keyDown" || input.alt || input.shift) {
-    return false;
-  }
-  return (input.meta || input.control) && input.key.toLowerCase() === "r";
-}
-
-function isBrowserLocationInput(input: Electron.Input): boolean {
-  if (input.type !== "keyDown" || input.alt || input.shift) {
-    return false;
-  }
-  return (input.meta || input.control) && input.key.toLowerCase() === "l";
-}
-
-function isForwardablePaseoShortcutInput(input: Electron.Input): boolean {
-  if (input.type !== "keyDown") {
-    return false;
-  }
-  if (!input.meta && !input.control) {
-    return false;
-  }
-  return FORWARDED_PASEO_SHORTCUT_KEYS.has(input.key.toLowerCase());
-}
+const pendingBrowserWebviewIdsByHostWebContentsId = new Map<number, string[]>();
+const browserKeyboard = new BrowserKeyboard();
+browserKeyboard.registerIpc();
 
 function showBrowserWebviewContextMenu(
   win: BrowserWindow,
@@ -335,10 +285,10 @@ ipcMain.handle("paseo:browser:unregister-workspace-browser", (_event, browserId:
   }
 });
 
-ipcMain.handle("paseo:browser:set-workspace-active-browser", (_event, rawInput: unknown) => {
+ipcMain.handle("paseo:browser:set-workspace-active-browser", (event, rawInput: unknown) => {
   const input = readActiveBrowserInput(rawInput);
   if (input) {
-    setWorkspaceActivePaseoBrowserId(input);
+    setWorkspaceActivePaseoBrowserId({ ...input, hostWebContentsId: event.sender.id });
   }
 });
 
@@ -478,6 +428,10 @@ function getPreloadPath(): string {
   return path.join(__dirname, "preload.js");
 }
 
+function getBrowserKeyboardPreloadPath(): string {
+  return path.join(__dirname, "features", "browser-keyboard", "guest-preload.js");
+}
+
 function getAppDistDir(): string {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, "app-dist");
@@ -581,6 +535,8 @@ async function createWindow(
   pendingOpenProjectStore.set(webContentsId, options.pendingOpenProjectPath);
   mainWindow.on("closed", () => {
     pendingOpenProjectStore.delete(webContentsId);
+    pendingBrowserWebviewIdsByHostWebContentsId.delete(webContentsId);
+    browserKeyboard.detachHost(webContentsId);
   });
 
   if (devWorktreeName) {
@@ -604,7 +560,14 @@ async function createWindow(
       event.preventDefault();
       return;
     }
-    pendingBrowserWebviewIds.push(browserId);
+    const pendingBrowserWebviewIds = pendingBrowserWebviewIdsByHostWebContentsId.get(
+      mainWindow.webContents.id,
+    );
+    if (pendingBrowserWebviewIds) {
+      pendingBrowserWebviewIds.push(browserId);
+    } else {
+      pendingBrowserWebviewIdsByHostWebContentsId.set(mainWindow.webContents.id, [browserId]);
+    }
     webPreferences.nodeIntegration = false;
     webPreferences.nodeIntegrationInSubFrames = false;
     webPreferences.nodeIntegrationInWorker = false;
@@ -617,48 +580,30 @@ async function createWindow(
     delete params.preload;
     delete (webPreferences as { preloadURL?: string }).preloadURL;
     delete (params as { preloadURL?: string }).preloadURL;
+    webPreferences.preload = getBrowserKeyboardPreloadPath();
   });
   mainWindow.webContents.on("did-attach-webview", (_event, contents) => {
-    const browserId = pendingBrowserWebviewIds.shift() ?? null;
+    const pendingBrowserWebviewIds = pendingBrowserWebviewIdsByHostWebContentsId.get(
+      mainWindow.webContents.id,
+    );
+    const browserId = pendingBrowserWebviewIds?.shift() ?? null;
     if (browserId) {
-      registerPaseoBrowserWebContents(contents, browserId);
+      registerPaseoBrowserWebContents({
+        contents,
+        browserId,
+        hostWebContentsId: mainWindow.webContents.id,
+      });
+      browserKeyboard.attach({
+        browserId,
+        contents,
+        hostContents: mainWindow.webContents,
+      });
       log.info("[browser-webview] registered", {
         browserId,
         webContentsId: contents.id,
         registeredBrowserIds: listRegisteredPaseoBrowserIds(),
       });
     }
-    contents.on("before-input-event", (event, input) => {
-      if (isBrowserRefreshInput(input)) {
-        event.preventDefault();
-        if (contents.isLoadingMainFrame()) {
-          contents.stop();
-        } else {
-          contents.reload();
-        }
-        return;
-      }
-      if (isBrowserLocationInput(input)) {
-        event.preventDefault();
-        const focusedBrowserId = getPaseoBrowserIdForWebContents(contents);
-        mainWindow.webContents.send(BROWSER_SHORTCUT_EVENT, {
-          action: "focus-url",
-          ...(focusedBrowserId ? { browserId: focusedBrowserId } : {}),
-        });
-        return;
-      }
-      if (isForwardablePaseoShortcutInput(input)) {
-        event.preventDefault();
-        mainWindow.webContents.send(BROWSER_FORWARDED_KEY_EVENT, {
-          key: input.key,
-          code: input.code,
-          meta: input.meta,
-          control: input.control,
-          shift: input.shift,
-          alt: input.alt,
-        });
-      }
-    });
     contents.setWindowOpenHandler(({ url }) =>
       handleBrowserWindowOpenRequest({
         url,

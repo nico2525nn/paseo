@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { getElectronHost } from "@/desktop/electron/host";
+import type { BrowserShortcutPrefix } from "@/keyboard/browser-shortcuts";
 import type { SessionInboundMessage, SessionOutboundMessage } from "@getpaseo/protocol/messages";
 
 type BrowserAutomationExecuteRequest = Extract<
@@ -116,10 +117,9 @@ export interface DesktopEventsBridge {
   on?: (event: string, handler: (payload: unknown) => void) => Promise<() => void> | (() => void);
 }
 
-export interface DesktopBrowserShortcutEvent {
-  browserId?: string;
-  action: "focus-url";
-}
+export type DesktopBrowserShortcutEvent =
+  | { browserId?: string; action: "focus-url" }
+  | { browserId: string; action: "new-tab" };
 
 export interface DesktopBrowserNewTabRequestEvent {
   sourceBrowserId: string;
@@ -127,6 +127,7 @@ export interface DesktopBrowserNewTabRequestEvent {
 }
 
 export interface DesktopBrowserBridge {
+  setShortcutPolicy?: (input: { prefixes: BrowserShortcutPrefix[] }) => Promise<void>;
   registerWorkspaceBrowser?: (input: { browserId: string; workspaceId: string }) => Promise<void>;
   unregisterWorkspaceBrowser?: (browserId: string) => Promise<void>;
   setWorkspaceActiveBrowser?: (input: {

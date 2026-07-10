@@ -6,17 +6,31 @@ export interface BrowserWorkspaceRegistration {
 export class PaseoBrowserWebviewRegistry {
   private readonly browserIdsByWebContentsId = new Map<number, string>();
   private readonly webContentsIdsByBrowserId = new Map<string, number>();
+  private readonly hostWebContentsIdsByBrowserId = new Map<string, number>();
   private readonly workspaceIdsByBrowserId = new Map<string, string>();
-  private readonly activeBrowserIdsByWorkspaceId = new Map<string, string>();
+  private readonly activeBrowserIdsByHostWindow = new Map<number, Map<string, string>>();
 
-  public registerWebContents(input: { webContentsId: number; browserId: string }): void {
+  public registerWebContents(input: {
+    webContentsId: number;
+    browserId: string;
+    hostWebContentsId: number;
+  }): void {
     const previousWebContentsId = this.webContentsIdsByBrowserId.get(input.browserId) ?? null;
+    const previousHostWebContentsId =
+      this.hostWebContentsIdsByBrowserId.get(input.browserId) ?? null;
     if (previousWebContentsId !== null && previousWebContentsId !== input.webContentsId) {
       this.browserIdsByWebContentsId.delete(previousWebContentsId);
+    }
+    if (
+      previousHostWebContentsId !== null &&
+      previousHostWebContentsId !== input.hostWebContentsId
+    ) {
+      this.deleteActiveBrowserReferences(input.browserId);
     }
 
     this.browserIdsByWebContentsId.set(input.webContentsId, input.browserId);
     this.webContentsIdsByBrowserId.set(input.browserId, input.webContentsId);
+    this.hostWebContentsIdsByBrowserId.set(input.browserId, input.hostWebContentsId);
   }
 
   public unregisterWebContents(webContentsId: number): void {
@@ -31,6 +45,7 @@ export class PaseoBrowserWebviewRegistry {
     }
 
     this.webContentsIdsByBrowserId.delete(browserId);
+    this.hostWebContentsIdsByBrowserId.delete(browserId);
     this.workspaceIdsByBrowserId.delete(browserId);
     this.deleteActiveBrowserReferences(browserId);
   }
@@ -57,6 +72,7 @@ export class PaseoBrowserWebviewRegistry {
       this.browserIdsByWebContentsId.delete(webContentsId);
       this.webContentsIdsByBrowserId.delete(browserId);
     }
+    this.hostWebContentsIdsByBrowserId.delete(browserId);
     this.workspaceIdsByBrowserId.delete(browserId);
     this.deleteActiveBrowserReferences(browserId);
   }
@@ -71,28 +87,65 @@ export class PaseoBrowserWebviewRegistry {
     );
   }
 
-  public setWorkspaceActiveBrowser(input: { workspaceId: string; browserId: string | null }): void {
-    if (input.browserId) {
-      this.workspaceIdsByBrowserId.set(input.browserId, input.workspaceId);
-      this.activeBrowserIdsByWorkspaceId.delete(input.workspaceId);
-      this.activeBrowserIdsByWorkspaceId.set(input.workspaceId, input.browserId);
+  public setWorkspaceActiveBrowser(input: {
+    hostWebContentsId: number;
+    workspaceId: string;
+    browserId: string | null;
+  }): void {
+    if (input.browserId === null) {
+      const activeBrowserIdsByWorkspace = this.activeBrowserIdsByHostWindow.get(
+        input.hostWebContentsId,
+      );
+      if (!activeBrowserIdsByWorkspace) {
+        return;
+      }
+      activeBrowserIdsByWorkspace.delete(input.workspaceId);
+      if (activeBrowserIdsByWorkspace.size === 0) {
+        this.activeBrowserIdsByHostWindow.delete(input.hostWebContentsId);
+      }
       return;
     }
-    this.activeBrowserIdsByWorkspaceId.delete(input.workspaceId);
+    if (this.hostWebContentsIdsByBrowserId.get(input.browserId) !== input.hostWebContentsId) {
+      return;
+    }
+
+    this.workspaceIdsByBrowserId.set(input.browserId, input.workspaceId);
+    const activeBrowserIdsByWorkspace =
+      this.activeBrowserIdsByHostWindow.get(input.hostWebContentsId) ?? new Map<string, string>();
+    activeBrowserIdsByWorkspace.delete(input.workspaceId);
+    activeBrowserIdsByWorkspace.set(input.workspaceId, input.browserId);
+    this.activeBrowserIdsByHostWindow.delete(input.hostWebContentsId);
+    this.activeBrowserIdsByHostWindow.set(input.hostWebContentsId, activeBrowserIdsByWorkspace);
   }
 
-  public getWorkspaceActiveBrowserId(workspaceId: string): string | null {
-    return this.activeBrowserIdsByWorkspaceId.get(workspaceId) ?? null;
+  public getActiveBrowserIdForHostWindow(hostWebContentsId: number): string | null {
+    return (
+      Array.from(this.activeBrowserIdsByHostWindow.get(hostWebContentsId)?.values() ?? []).at(-1) ??
+      null
+    );
   }
 
-  public getMostRecentWorkspaceActiveBrowserId(): string | null {
-    return Array.from(this.activeBrowserIdsByWorkspaceId.values()).at(-1) ?? null;
+  public getMostRecentActiveBrowserIdForWorkspace(workspaceId: string): string | null {
+    const activeBrowserIdsByHostWindow = Array.from(this.activeBrowserIdsByHostWindow.values());
+    for (let index = activeBrowserIdsByHostWindow.length - 1; index >= 0; index -= 1) {
+      const browserId = activeBrowserIdsByHostWindow[index].get(workspaceId);
+      if (browserId) {
+        return browserId;
+      }
+    }
+    return null;
   }
 
   private deleteActiveBrowserReferences(browserId: string): void {
-    for (const [workspaceId, activeBrowserId] of this.activeBrowserIdsByWorkspaceId) {
-      if (activeBrowserId === browserId) {
-        this.activeBrowserIdsByWorkspaceId.delete(workspaceId);
+    for (const [hostWebContentsId, activeBrowserIdsByWorkspace] of this
+      .activeBrowserIdsByHostWindow) {
+      for (const [workspaceId, activeBrowserId] of activeBrowserIdsByWorkspace) {
+        if (activeBrowserId === browserId) {
+          activeBrowserIdsByWorkspace.delete(workspaceId);
+        }
+      }
+      if (activeBrowserIdsByWorkspace.size === 0) {
+        this.activeBrowserIdsByHostWindow.delete(hostWebContentsId);
       }
     }
   }

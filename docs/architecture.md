@@ -138,7 +138,21 @@ Electron wrapper for macOS, Linux, and Windows.
 
 > **Window-state v1 limitation:** only the _first_ window of a session restores and persists saved geometry (size/position/maximized). Windows opened via ⌘⇧N / second-instance / "Open in new window" open at the default size, OS-cascaded, and do not persist — this avoids every window stacking on the same restored bounds and fighting over the single window-state store. Lifting this needs per-window state keys.
 >
-> **In-app browser panes are not yet per-window.** Browser webviews are tracked by one process-global registry that keeps a single current `WebContents` per browser id. Human focus still records the workspace-active browser for UI state and `list_tabs` reporting, but agent automation targets only explicit browser ids returned by `browser_new_tab` or `browser_list_tabs`. The webview registration queue (`pendingBrowserWebviewIds` in `main.ts`) is still process-global. With browser panes open in two windows, a menu Reload can target the other window's webview, and near-simultaneous webview attach across windows can register under the wrong browser id. Multi-window v1 ships windows; making the browser-webview subsystem window-scoped is a follow-up.
+> **In-app browser ownership.** Each registered guest records its owning host window. The active browser is keyed by `(host window, workspace)`, and application-menu Reload / Force Reload resolve only within the window Electron supplies to the menu callback. A non-null active update must name a browser owned by that host; a null update clears only that host/workspace. Browser automation continues to target explicit browser ids returned by `browser_new_tab` or `browser_list_tabs`.
+>
+> **Browser keyboard boundary.** Guest pages receive renderer-published shortcuts first. `Cmd/Ctrl+T`, `Cmd/Ctrl+L`, and `Cmd/Ctrl+R` are explicit guest-shell reservations; ordinary Paseo shortcuts run only after the page declines them. Human guest input disables Electron's menu fallback for plain keys. Agent-generated keys use guest `sendInputEvent` with `skipIfUnhandled`, so an unhandled Enter stops at the guest instead of reaching the host composer. Main selects the sandboxed guest preload; it exposes no APIs to guest pages.
+
+```text
+Human key -> guest WebContents
+  |-- Cmd/Ctrl+T/L/R ----------> reserved browser-shell action
+  `-- page keydown
+        |-- page prevents ------> page owns it
+        `-- published shortcut -> guest preload -> IPC(browserId) -> Paseo resolver
+
+Agent browser_keypress -> guest sendInputEvent(skipIfUnhandled)
+  |-- guest handles ------------> page owns it
+  `-- guest does not handle ----> stop; never redispatch to the host window
+```
 
 ### `packages/website` — Marketing site
 
