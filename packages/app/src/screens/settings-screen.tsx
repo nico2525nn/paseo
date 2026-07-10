@@ -58,7 +58,7 @@ import { useHostRuntimeIsConnected, useHosts } from "@/runtime/host-runtime";
 import { useSessionStore } from "@/stores/session-store";
 import { orderHostsLocalFirst, type HostProfile } from "@/types/host-connection";
 import { TitlebarDragRegion } from "@/components/desktop/titlebar-drag-region";
-import { useWindowControlsPadding } from "@/utils/desktop-window";
+import { WindowChromeRegion, WindowChromeSafeArea } from "@/utils/desktop-window";
 import { confirmDialog } from "@/utils/confirm-dialog";
 import { BackHeader } from "@/components/headers/back-header";
 import { ScreenHeader } from "@/components/headers/screen-header";
@@ -1005,7 +1005,6 @@ function SettingsSidebar({
   const isDesktopApp = isElectronRuntime();
   const items = SIDEBAR_SECTION_ITEMS.filter((item) => !item.desktopOnly || isDesktopApp);
   const insets = useSafeAreaInsets();
-  const padding = useWindowControlsPadding("sidebar");
   const isDesktop = layout === "desktop";
   const outerContainerStyle = useMemo(
     () => [isDesktop ? sidebarStyles.desktopContainer : sidebarStyles.mobileContainer],
@@ -1018,7 +1017,6 @@ function SettingsSidebar({
   const selectedSectionId = view.kind === "section" ? view.section : null;
   const selectedHostSection = view.kind === "host" ? view.section : null;
   const isProjectsSelected = view.kind === "projects" || view.kind === "project";
-  const paddingTopStyle = useMemo(() => ({ height: padding.top }), [padding.top]);
 
   const sidebarBody = (
     <>
@@ -1100,7 +1098,7 @@ function SettingsSidebar({
         <View style={innerContainerStyle}>
           <View style={sidebarStyles.sidebarDragArea}>
             <TitlebarDragRegion />
-            {padding.top > 0 ? <View style={paddingTopStyle} /> : null}
+            <WindowChromeSafeArea placement="below" />
             <SidebarHeaderRow
               icon={ArrowLeft}
               label={t("settings.backToWorkspace")}
@@ -1454,6 +1452,16 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
     );
   }
 
+  const desktopDetailHeaderLeft = detailHeader ? (
+    <>
+      <HeaderIconBadge>
+        <detailHeader.Icon size={theme.iconSize.md} color={theme.colors.foregroundMuted} />
+      </HeaderIconBadge>
+      <ScreenTitle testID="settings-detail-header-title">{detailHeader.title}</ScreenTitle>
+      {detailHeader.titleAccessory}
+    </>
+  ) : null;
+
   const addHostModals = (
     <>
       <AddHostMethodModal
@@ -1528,43 +1536,31 @@ export default function SettingsScreen({ view, openAddHostIntent = null }: Setti
   return (
     <View style={styles.container}>
       <View style={desktopStyles.row}>
-        <SettingsSidebar
-          view={view}
-          onSelectSection={handleSelectSection}
-          onSelectHostSection={handleSelectHostSection}
-          onSelectHost={handleSelectHost}
-          onSelectProjects={handleSelectProjects}
-          onAddHost={handleAddHost}
-          onBackToWorkspace={handleBackToWorkspace}
-          activeHostServerId={activeHostServerId}
-          layout="desktop"
-        />
-        <View style={desktopStyles.contentPane}>
-          <ScreenHeader
-            borderless={!detailHeader}
-            windowControlsPaddingRole="detailHeader"
-            left={
-              detailHeader ? (
-                <>
-                  <HeaderIconBadge>
-                    <detailHeader.Icon
-                      size={theme.iconSize.md}
-                      color={theme.colors.foregroundMuted}
-                    />
-                  </HeaderIconBadge>
-                  <ScreenTitle testID="settings-detail-header-title">
-                    {detailHeader.title}
-                  </ScreenTitle>
-                  {detailHeader.titleAccessory}
-                </>
-              ) : null
-            }
-            leftStyle={desktopStyles.detailLeft}
+        <WindowChromeRegion corners="top-left">
+          <SettingsSidebar
+            view={view}
+            onSelectSection={handleSelectSection}
+            onSelectHostSection={handleSelectHostSection}
+            onSelectHost={handleSelectHost}
+            onSelectProjects={handleSelectProjects}
+            onAddHost={handleAddHost}
+            onBackToWorkspace={handleBackToWorkspace}
+            activeHostServerId={activeHostServerId}
+            layout="desktop"
           />
-          <ScrollView style={scrollViewStyle} contentContainerStyle={insetBottomStyle}>
-            <View style={styles.content}>{content}</View>
-          </ScrollView>
-        </View>
+        </WindowChromeRegion>
+        <WindowChromeRegion corners="top-right">
+          <View style={desktopStyles.contentPane} testID="settings-detail-pane">
+            <ScreenHeader
+              borderless={!detailHeader}
+              left={desktopDetailHeaderLeft}
+              leftStyle={desktopStyles.detailLeft}
+            />
+            <ScrollView style={scrollViewStyle} contentContainerStyle={insetBottomStyle}>
+              <View style={styles.content}>{content}</View>
+            </ScrollView>
+          </View>
+        </WindowChromeRegion>
       </View>
       {addHostModals}
     </View>
