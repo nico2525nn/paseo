@@ -2,15 +2,26 @@ import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { getHostRuntimeStore } from "@/runtime/host-runtime";
 import { useToast } from "@/contexts/toast-context";
-import { useCheckoutGitActionsStore } from "@/git/actions-store";
 import {
   confirmRiskyWorktreeArchive,
   DEFAULT_WORKTREE_ARCHIVE_WARNING_LABELS,
   type WorktreeArchiveWarningLabels,
 } from "@/git/worktree-archive-warning";
 import type { WorkspaceDescriptor } from "@/stores/session-store";
+import {
+  buildWorkspaceTabPersistenceKey,
+  useWorkspaceLayoutStore,
+} from "@/stores/workspace-layout-store";
+import { useWorkspaceTabsStore } from "@/stores/workspace-tabs-store";
 import { archiveWorkspaceOptimistically } from "@/workspace/workspace-archive";
-import { requireWorkspaceDirectory } from "@/utils/workspace-directory";
+
+function purgeArchivedWorkspaceState(input: { serverId: string; workspaceId: string }): void {
+  const workspaceKey = buildWorkspaceTabPersistenceKey(input);
+  if (workspaceKey) {
+    useWorkspaceLayoutStore.getState().purgeWorkspace(workspaceKey);
+  }
+  useWorkspaceTabsStore.getState().purgeWorkspace(input);
+}
 
 export interface ArchiveWorkspaceInput {
   serverId: string;
@@ -46,37 +57,8 @@ export function useWorkspaceArchive(input: ArchiveWorkspaceInput): WorkspaceArch
   } = input;
   const { t } = useTranslation();
   const toast = useToast();
-  const archiveWorktree = useCheckoutGitActionsStore((state) => state.archiveWorktree);
 
-  const archiveWorktreeRecord = useCallback(() => {
-    let archiveDirectory: string;
-    try {
-      archiveDirectory = requireWorkspaceDirectory({
-        workspaceId,
-        workspaceDirectory,
-      });
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t("sidebar.workspace.toasts.workspacePathUnavailable"),
-      );
-      return;
-    }
-    onArchiveStarted();
-    void archiveWorktree({
-      serverId,
-      cwd: archiveDirectory,
-      worktreePath: archiveDirectory,
-      workspaceId,
-    }).catch((error) => {
-      toast.error(
-        error instanceof Error ? error.message : t("sidebar.workspace.toasts.archiveFailed"),
-      );
-    });
-  }, [archiveWorktree, onArchiveStarted, serverId, t, toast, workspaceDirectory, workspaceId]);
-
-  const archiveNonWorktreeRecord = useCallback(async () => {
+  const archiveWorkspaceRecord = useCallback(async () => {
     const client = getHostRuntimeStore().getClient(serverId);
     if (!client) {
       toast.error(t("sidebar.workspace.toasts.hostDisconnected"));
@@ -89,24 +71,26 @@ export function useWorkspaceArchive(input: ArchiveWorkspaceInput): WorkspaceArch
         workspace: {
           serverId,
           workspaceId,
+          workspaceDirectory,
         },
         afterHide: onArchiveStarted,
       });
+      purgeArchivedWorkspaceState({ serverId, workspaceId });
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : t("sidebar.workspace.toasts.hideFailed"),
+        error instanceof Error ? error.message : t("sidebar.workspace.toasts.archiveFailed"),
       );
     } finally {
       onSetHiding?.(false);
     }
-  }, [onArchiveStarted, onSetHiding, serverId, t, toast, workspaceId]);
+  }, [onArchiveStarted, onSetHiding, serverId, t, toast, workspaceDirectory, workspaceId]);
 
   const archive = useCallback(() => {
     void (async () => {
       if (workspaceKind === "worktree") {
         const confirmed = await confirmRiskyWorktreeArchive(
           {
-            worktreeName: name,
+            workspaceName: name,
             isDirty,
             aheadOfOrigin,
             diffStat,
@@ -116,15 +100,12 @@ export function useWorkspaceArchive(input: ArchiveWorkspaceInput): WorkspaceArch
         if (!confirmed) {
           return;
         }
-        archiveWorktreeRecord();
-        return;
       }
-      await archiveNonWorktreeRecord();
+      await archiveWorkspaceRecord();
     })();
   }, [
     aheadOfOrigin,
-    archiveNonWorktreeRecord,
-    archiveWorktreeRecord,
+    archiveWorkspaceRecord,
     diffStat,
     isDirty,
     name,

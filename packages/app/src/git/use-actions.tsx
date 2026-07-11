@@ -22,6 +22,7 @@ import {
 import { redirectIfArchivingActiveWorkspace } from "@/utils/sidebar-workspace-archive-redirect";
 import { type WorktreeArchiveWarningLabels } from "@/git/worktree-archive-warning";
 import { useWorkspaceArchive } from "@/workspace/use-workspace-archive";
+import { resolveWorkspaceMapKeyByIdentity } from "@/utils/workspace-identity";
 
 export type { GitActionId, GitAction, GitActions } from "@/git/policy";
 
@@ -97,15 +98,12 @@ function extractGitCommitCounts(gitStatus: CheckoutStatusPayload | null): GitCom
 }
 
 function computeShouldPromoteArchive(input: {
-  isPaseoOwnedWorktree: boolean;
   hasUncommittedChanges: boolean;
   postShipArchiveSuggested: boolean;
   isMergedPullRequest: boolean;
 }): boolean {
   return (
-    input.isPaseoOwnedWorktree &&
-    !input.hasUncommittedChanges &&
-    (input.postShipArchiveSuggested || input.isMergedPullRequest)
+    !input.hasUncommittedChanges && (input.postShipArchiveSuggested || input.isMergedPullRequest)
   );
 }
 
@@ -131,7 +129,6 @@ function deriveGitActionsState(args: DeriveGitActionsStateArgs): DerivedGitActio
     isPaseoOwnedWorktree,
     isOnBaseBranch: gitStatus?.currentBranch === baseRefLabel,
     shouldPromoteArchive: computeShouldPromoteArchive({
-      isPaseoOwnedWorktree,
       hasUncommittedChanges,
       postShipArchiveSuggested,
       isMergedPullRequest,
@@ -182,7 +179,17 @@ function useWorkspaceScreenArchiveController({
   t,
 }: UseWorkspaceScreenArchiveControllerInput) {
   const sessionWorkspaces = useSessionStore((state) => state.sessions[serverId]?.workspaces);
+  const [isHidingWorkspace, setIsHidingWorkspace] = useState(false);
   const archiveWorkspaceRecord = useMemo(() => {
+    const activeWorkspaceKey = activeWorkspaceSelection
+      ? resolveWorkspaceMapKeyByIdentity({
+          workspaces: sessionWorkspaces,
+          workspaceId: activeWorkspaceSelection.workspaceId,
+        })
+      : null;
+    if (activeWorkspaceKey) {
+      return sessionWorkspaces?.get(activeWorkspaceKey) ?? null;
+    }
     if (!workspaceDirectory) {
       return null;
     }
@@ -192,18 +199,19 @@ function useWorkspaceScreenArchiveController({
       }
     }
     return null;
-  }, [sessionWorkspaces, workspaceDirectory]);
+  }, [activeWorkspaceSelection, sessionWorkspaces, workspaceDirectory]);
 
-  return useWorkspaceArchive({
+  const controller = useWorkspaceArchive({
     serverId,
-    workspaceId: activeWorkspaceSelection?.workspaceId ?? archiveWorkspaceRecord?.id ?? "",
-    workspaceDirectory,
-    workspaceKind: gitStatus?.isPaseoOwnedWorktree ? "worktree" : "local_checkout",
+    workspaceId: archiveWorkspaceRecord?.id ?? "",
+    workspaceDirectory: archiveWorkspaceRecord?.workspaceDirectory ?? workspaceDirectory,
+    workspaceKind: archiveWorkspaceRecord?.workspaceKind ?? "directory",
     name: archiveWorkspaceRecord?.name ?? branchLabel,
     isDirty: gitStatus?.isDirty,
     aheadOfOrigin: gitStatus?.aheadOfOrigin,
     diffStat: archiveWorkspaceRecord?.diffStat ?? null,
     warningLabels: getWorktreeArchiveWarningLabels(t),
+    onSetHiding: setIsHidingWorkspace,
     onArchiveStarted: () => {
       if (!activeWorkspaceSelection) {
         return;
@@ -215,6 +223,12 @@ function useWorkspaceScreenArchiveController({
       });
     },
   });
+
+  return {
+    ...controller,
+    isArchiving: archiveWorkspaceRecord?.archivingAt != null || isHidingWorkspace,
+    hasWorkspace: archiveWorkspaceRecord !== null,
+  };
 }
 
 export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): UseGitActionsResult {
@@ -341,9 +355,6 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
   );
   const mergeFromBaseStatus = useCheckoutGitActionsStore((s) =>
     s.getStatus({ serverId, cwd, actionId: "merge-from-base" }),
-  );
-  const archiveStatus = useCheckoutGitActionsStore((s) =>
-    s.getStatus({ serverId, cwd, actionId: "archive-worktree" }),
   );
 
   const runCommit = useCheckoutGitActionsStore((s) => s.commit);
@@ -533,7 +544,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
     t,
   });
 
-  const handleArchiveWorktree = useCallback(() => {
+  const handleArchiveWorkspace = useCallback(() => {
     archiveController.archive();
   }, [archiveController]);
 
@@ -678,11 +689,11 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
           icon: icons.mergeFromBase,
           handler: handleMergeFromBase,
         },
-        "archive-worktree": {
-          disabled: isActionDisabled(actionsDisabled, archiveStatus),
-          status: archiveStatus,
+        "archive-workspace": {
+          disabled: !archiveController.hasWorkspace || archiveController.isArchiving,
+          status: archiveController.isArchiving ? "pending" : "idle",
           icon: icons.archive,
-          handler: handleArchiveWorktree,
+          handler: handleArchiveWorkspace,
         },
       },
     }),
@@ -723,7 +734,8 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
       disablePrAutoMergeStatus,
       mergeStatus,
       mergeFromBaseStatus,
-      archiveStatus,
+      archiveController.hasWorkspace,
+      archiveController.isArchiving,
       handleCommit,
       handlePull,
       handlePush,
@@ -734,7 +746,7 @@ export function useGitActions({ serverId, cwd, icons }: UseGitActionsInput): Use
       handleDisablePrAutoMerge,
       handleMergeBranch,
       handleMergeFromBase,
-      handleArchiveWorktree,
+      handleArchiveWorkspace,
       icons,
       baseRef,
     ],
@@ -890,7 +902,7 @@ function getTranslatedGitActionLabels(
         pendingLabel: t("workspace.git.actions.mergeFromBase.pending"),
         successLabel: t("workspace.git.actions.mergeFromBase.success"),
       };
-    case "archive-worktree":
+    case "archive-workspace":
       return {
         label: t("workspace.git.actions.archive.label"),
         pendingLabel: t("workspace.git.actions.archive.pending"),
@@ -945,8 +957,6 @@ function translateGitActionUnavailableMessage(
       "workspace.git.actions.unavailable.updateNoBase",
     "Update isn't available while you have local changes so commit or stash them first":
       "workspace.git.actions.unavailable.updateDirty",
-    "Archive isn't available here because this workspace was not created as a Paseo worktree":
-      "workspace.git.actions.unavailable.archiveNotWorktree",
     "Merge PR isn't available right now because GitHub isn't connected":
       "workspace.git.actions.unavailable.mergePrNoGithub",
     "Merge PR isn't available because there isn't a pull request yet":
@@ -979,7 +989,7 @@ function getWorktreeArchiveWarningLabels(
   t: (key: string, options?: Record<string, unknown>) => string,
 ): WorktreeArchiveWarningLabels {
   return {
-    title: (worktreeName) => t("workspace.git.actions.archiveWarning.title", { worktreeName }),
+    title: (workspaceName) => t("workspace.git.actions.archiveWarning.title", { workspaceName }),
     confirm: t("workspace.git.actions.archiveWarning.confirm"),
     cancel: t("workspace.git.actions.archiveWarning.cancel"),
     uncommittedChanges: t("workspace.git.actions.archiveWarning.uncommittedChanges"),

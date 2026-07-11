@@ -8,11 +8,11 @@ import {
   openProjectViaDaemon,
 } from "./helpers/new-workspace";
 import { getServerId } from "./helpers/server-id";
-import { archiveWorktreeFromSidebar, expectWorkspaceAbsentFromSidebar } from "./helpers/sidebar";
+import { archiveWorkspaceFromSidebar, expectWorkspaceAbsentFromSidebar } from "./helpers/sidebar";
 import { createTempGitRepo } from "./helpers/workspace";
 import { waitForSidebarHydration, waitForWorkspaceInSidebar } from "./helpers/workspace-ui";
 
-test.describe("Worktree archive", () => {
+test.describe("Workspace archive with worktree backing", () => {
   let client: Awaited<ReturnType<typeof connectNewWorkspaceDaemonClient>>;
   let tempRepo: { path: string; cleanup: () => Promise<void> };
   const createdWorktreeDirectories = new Set<string>();
@@ -33,9 +33,7 @@ test.describe("Worktree archive", () => {
     await tempRepo?.cleanup().catch(() => undefined);
   });
 
-  test("archiving a worktree from the sidebar removes its row and worktree directory", async ({
-    page,
-  }) => {
+  test("archiving the final workspace removes its managed worktree directory", async ({ page }) => {
     const serverId = getServerId();
     await openProjectViaDaemon(client, tempRepo.path);
     const worktree = await createWorktreeViaDaemon(client, {
@@ -49,7 +47,7 @@ test.describe("Worktree archive", () => {
     await waitForSidebarHydration(page);
     await waitForWorkspaceInSidebar(page, { serverId, workspaceId: worktree.workspaceId });
 
-    await archiveWorktreeFromSidebar(page, worktree.workspaceId);
+    await archiveWorkspaceFromSidebar(page, worktree.workspaceId);
 
     await expectWorkspaceAbsentFromSidebar(page, worktree.workspaceId);
     await expect
